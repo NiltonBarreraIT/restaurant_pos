@@ -14,6 +14,7 @@ class OrderStatus(str, Enum):
     READY = "ready"       # listo para entregar
     DELIVERED = "delivered"
     CANCELLED = "cancelled"
+    CLOSED = "closed"     # cerrado por cierre de caja
 
 class PaymentMethod(str, Enum):
     CASH = "cash"           # efectivo
@@ -65,8 +66,15 @@ class Order(db.Model):
     )
     cash_register = db.relationship("CashRegister", back_populates="orders")
 
+    # ✅ Correlativo por caja (1..N por cada cash_register)
+    number_in_register = db.Column(db.Integer, nullable=False, default=1, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("cash_register_id", "number_in_register", name="uq_order_register_number"),
+    )
+
     # Auditoría
-    created_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     created_by = db.relationship("User", foreign_keys=[created_by_id])
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
@@ -77,8 +85,12 @@ class Order(db.Model):
     items = db.relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     payments = db.relationship("Payment", back_populates="order", cascade="all, delete-orphan")
 
-    def total_amount(self):
-        return sum(float(it.unit_price) * it.quantity for it in self.items)
+    def total_amount(self) -> float:
+        """
+        Total del pedido calculado desde items.
+        Retorna float para facilitar JSON/plantillas.
+        """
+        return sum(float(it.unit_price or 0) * int(it.quantity or 0) for it in (self.items or []))
 
 
 class OrderItem(db.Model):

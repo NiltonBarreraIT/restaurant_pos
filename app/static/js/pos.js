@@ -1,7 +1,13 @@
 /* =========================================================
-   POS.JS (corregido)
-   - Fallback si no existe openCashModal/openCashForm
-   - paymentMethod UI: "Efectivo"/"Transferencia" -> API: "cash"/"transfer"
+   POS.JS (actualizado)
+   - Correlativo por caja: muestra number_in_register en historial
+   - Historial muestra producto real (primer item) + (+N)
+   - Soporta estado "closed"
+   - Al abrir/cerrar caja limpia pedido y refresca historial
+   - Imprimir ticket sin /null (dataset + closest)
+   - Anular pedido real: POST /pos/orders/<id>/cancel
+   - ✅ REGLAS PAGO: valida también TRANSFERENCIA (no permite pagar < total)
+   - ✅ Vuelto: se calcula para efectivo y transferencia (según requerimiento)
    ========================================================= */
 
 let orderItems = [];
@@ -11,7 +17,7 @@ let currentDetailOrderId = null;
 /* ================== DOM SAFE GET ================== */
 const $ = (id) => document.getElementById(id);
 
-/* UI elements (pueden ser null si cambiaste HTML) */
+/* UI elements */
 const productsEl = $("products");
 const orderListEl = $("orderList");
 const referenceNameEl = $("referenceName");
@@ -47,9 +53,15 @@ const historialBody = $("historialBody");
 /* Detalle pedido (modal) */
 const orderDetailModalEl = $("orderDetailModal");
 const detailCustomer = $("detailCustomer");
-const detailDate = $("detailDate"); // si no existe, no pasa nada
+const detailDate = $("detailDate");
 const detailTotal = $("detailTotal");
 const detailItems = $("detailItems");
+const detailOrderNumber = $("detailOrderNumber");
+const detailStatusEl = $("detailStatus");
+
+/* Botones modal */
+const btnPrintTicket = $("btnPrintTicket");
+const btnCancelOrder = $("btnCancelOrder");
 
 /* ================== ESTADO CAJA ================== */
 let cashIsOpen = false;
@@ -60,23 +72,75 @@ function money(n) {
   return isNaN(num) ? 0 : Math.round(num);
 }
 
-// Mapea UI -> API
+// Mapea UI -> API (compatible con ambas versiones)
 function getPaymentMethodApi() {
   const v = (paymentMethodEl?.value || "").trim().toLowerCase();
 
-  // Tu HTML actual usa "Efectivo"/"Transferencia"
+  // Si el HTML trae valores textuales
   if (v === "efectivo") return "cash";
   if (v === "transferencia") return "transfer";
 
-  // Por si en algún momento usas values "cash"/"transfer"
+  // Si el HTML trae values correctos
   if (v === "cash" || v === "transfer") return v;
 
-  // default seguro
   return "cash";
 }
 
 function isCashPayment() {
   return getPaymentMethodApi() === "cash";
+}
+
+function resetCurrentOrderUI() {
+  orderItems = [];
+  total = 0;
+  if (referenceNameEl) referenceNameEl.value = "";
+  if (paidAmountEl) paidAmountEl.value = "";
+  if (pedidoVueltoEl) pedidoVueltoEl.innerText = "0";
+  renderOrder();
+}
+
+function setModalOrderId(orderId) {
+  currentDetailOrderId = orderId;
+
+  // ✅ dataset para evitar null al imprimir/anular
+  if (btnPrintTicket) btnPrintTicket.dataset.orderId = String(orderId);
+  if (btnCancelOrder) btnCancelOrder.dataset.orderId = String(orderId);
+}
+
+function statusBadgeHTML(st) {
+  const s = (st || "").toLowerCase();
+  if (s === "cancelled") return `<span class="badge bg-danger">Anulado</span>`;
+  if (s === "delivered") return `<span class="badge bg-primary">Entregado</span>`;
+  if (s === "ready") return `<span class="badge bg-success">Listo</span>`;
+  if (s === "closed") return `<span class="badge bg-secondary">Cerrado</span>`;
+  return `<span class="badge bg-warning text-dark">En preparación</span>`;
+}
+
+function setModalStatus(st) {
+  if (!detailStatusEl) return;
+  const s = (st || "").toLowerCase();
+  if (s === "cancelled") {
+    detailStatusEl.className = "order-status badge bg-danger";
+    detailStatusEl.textContent = "❌ Anulado";
+    return;
+  }
+  if (s === "delivered") {
+    detailStatusEl.className = "order-status badge bg-primary";
+    detailStatusEl.textContent = "✅ Entregado";
+    return;
+  }
+  if (s === "ready") {
+    detailStatusEl.className = "order-status badge bg-success";
+    detailStatusEl.textContent = "🟢 Listo";
+    return;
+  }
+  if (s === "closed") {
+    detailStatusEl.className = "order-status badge bg-secondary";
+    detailStatusEl.textContent = "🔒 Cerrado";
+    return;
+  }
+  detailStatusEl.className = "order-status badge bg-warning text-dark";
+  detailStatusEl.textContent = "🟡 En preparación";
 }
 
 /* ================== TOTALES / VALIDACIONES ================== */
@@ -86,15 +150,33 @@ function updateTotals() {
   updateProductButtons();
 }
 
+/**
+ * ✅ REGLAS DE PAGO (3 cambios incorporados)
+ * 1) No permite pagar < total (EFECTIVO y TRANSFERENCIA)
+ * 2) Calcula vuelto = paid - total (EFECTIVO y TRANSFERENCIA)
+ * 3) Bloquea "Cobrar y Enviar" cuando no cumple (caja cerrada / total 0 / paid < total)
+ */
 function updateChange() {
   if (!submitOrderBtn) return;
 
   const paid = money(paidAmountEl?.value);
-  const isCash = isCashPayment();
+  const methodApi = getPaymentMethodApi(); // "cash" | "transfer"
+  const isCash = methodApi === "cash";
+  const isTransfer = methodApi === "transfer";
 
   let change = 0;
 
-  if (isCash) {
+  // Sin items -> bloquea
+  if (total <= 0) {
+    change = 0;
+    if (payHint) payHint.classList.add("d-none");
+    if (pedidoVueltoEl) pedidoVueltoEl.innerText = money(change);
+    submitOrderBtn.disabled = true;
+    return;
+  }
+
+  // Efectivo o transferencia: deben cubrir total
+  if (isCash || isTransfer) {
     if (paid < total) {
       if (payHint) payHint.classList.remove("d-none");
       change = 0;
@@ -104,14 +186,15 @@ function updateChange() {
       change = paid - total;
     }
   } else {
+    // fallback otros métodos
     if (payHint) payHint.classList.add("d-none");
-    change = 0; // transferencia no calcula vuelto
+    change = 0;
   }
 
   if (pedidoVueltoEl) pedidoVueltoEl.innerText = money(change);
 
-  // regla final
-  submitOrderBtn.disabled = !cashIsOpen || total <= 0 || (isCash && paid < total);
+  // Estado final del botón
+  submitOrderBtn.disabled = !cashIsOpen || total <= 0 || paid < total;
 }
 
 /* ================== PEDIDO ================== */
@@ -175,11 +258,12 @@ function loadProducts() {
         btn.innerText = `${p.name}\n$${money(p.price)}`;
         btn.dataset.id = p.id;
 
-        btn.onclick = () => addProduct({
-          id: p.id,
-          name: p.name,
-          price: money(p.price)
-        });
+        btn.onclick = () =>
+          addProduct({
+            id: p.id,
+            name: p.name,
+            price: money(p.price),
+          });
 
         col.appendChild(btn);
         productsEl.appendChild(col);
@@ -240,9 +324,9 @@ function submitOrder() {
 
   const paid = money(paidAmountEl?.value);
   const methodApi = getPaymentMethodApi();
-  const isCash = methodApi === "cash";
 
-  if (isCash && paid < total) {
+  // ✅ Regla para TODOS los métodos actuales (cash/transfer)
+  if (paid < total) {
     alert("El monto pagado es menor al total");
     return;
   }
@@ -252,19 +336,19 @@ function submitOrder() {
     items: orderItems.map((i) => ({
       product_id: i.id,
       qty: i.qty,
-      notes: ""
+      notes: "",
     })),
     payment: {
       method: methodApi,
       amount: Number(total),
-      reference: ""
-    }
+      reference: "",
+    },
   };
 
   fetch("/pos/orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   })
     .then(async (r) => {
       const data = await r.json().catch(() => ({}));
@@ -275,16 +359,11 @@ function submitOrder() {
       return data;
     })
     .then(() => {
-      try { successSound?.play(); } catch {}
+      try {
+        successSound?.play();
+      } catch {}
 
-      orderItems = [];
-      total = 0;
-      renderOrder();
-
-      if (referenceNameEl) referenceNameEl.value = "";
-      if (paidAmountEl) paidAmountEl.value = "";
-      if (pedidoVueltoEl) pedidoVueltoEl.innerText = "0";
-
+      resetCurrentOrderUI();
       cargarHistorial();
       referenceNameEl?.focus();
     })
@@ -307,25 +386,24 @@ function cargarHistorial() {
     .then((data) => {
       historialBody.innerHTML = "";
 
-      data.forEach((o) => {
+      (data || []).forEach((o) => {
         const tr = document.createElement("tr");
         tr.style.cursor = "pointer";
 
-        // Como tu endpoint history NO trae items, muestra guion
-        const productos = "—";
+        const num = o.number_in_register ?? o.order_number ?? o.id;
 
-        let estadoBadge = "";
-        const st = (o.status || "").toLowerCase();
-        if (st === "cancelled") estadoBadge = `<span class="badge bg-danger">Anulado</span>`;
-        else if (st === "delivered") estadoBadge = `<span class="badge bg-primary">Entregado</span>`;
-        else if (st === "ready") estadoBadge = `<span class="badge bg-success">Listo</span>`;
-        else estadoBadge = `<span class="badge bg-warning text-dark">En preparación</span>`;
+        const items = Array.isArray(o.items) ? o.items : [];
+        let productos = "—";
+        if (items.length > 0) {
+          productos = items[0].name || "—";
+          if (items.length > 1) productos += ` (+${items.length - 1})`;
+        }
 
         tr.innerHTML = `
-          <td>#${o.id}</td>
+          <td>#${num}</td>
           <td>${productos}</td>
           <td>${o.created_at || ""}</td>
-          <td class="text-center">${estadoBadge}</td>
+          <td class="text-center">${statusBadgeHTML(o.status)}</td>
         `;
 
         tr.onclick = () => mostrarDetallePedido(o.id);
@@ -337,7 +415,7 @@ function cargarHistorial() {
 
 /* ================== DETALLE PEDIDO ================== */
 function mostrarDetallePedido(orderId) {
-  currentDetailOrderId = orderId;
+  setModalOrderId(orderId);
 
   fetch(`/pos/orders/${orderId}`)
     .then(async (res) => {
@@ -346,7 +424,15 @@ function mostrarDetallePedido(orderId) {
     })
     .then((o) => {
       if (detailCustomer) detailCustomer.innerText = o.reference_name || "";
+      if (detailDate) detailDate.innerText = o.created_at || "";
       if (detailTotal) detailTotal.innerText = money(o.total);
+
+      if (detailOrderNumber) {
+        const num = o.number_in_register ?? o.order_number ?? "";
+        detailOrderNumber.innerText = num ? `#${num}` : "";
+      }
+
+      setModalStatus(o.status);
 
       if (detailItems) {
         detailItems.innerHTML = "";
@@ -369,15 +455,41 @@ function mostrarDetallePedido(orderId) {
     .catch((err) => console.error("Error detalle:", err));
 }
 
-/* Botones imprimir / anular */
-document.addEventListener("click", (e) => {
-  if (e.target && e.target.id === "btnPrintTicket") {
-    window.open(`/pos/receipt/${currentDetailOrderId}`, "_blank");
+/* ================== IMPRIMIR / ANULAR (ROBUSTO) ================== */
+document.addEventListener("click", async (e) => {
+  const printBtn = e.target.closest("#btnPrintTicket");
+  if (printBtn) {
+    const id = printBtn.dataset.orderId || currentDetailOrderId;
+    if (!id) return alert("No se encontró el ID del pedido para imprimir.");
+    window.open(`/pos/receipt/${id}`, "_blank");
+    return;
   }
 
-  if (e.target && e.target.id === "btnCancelOrder") {
-    // ojo: tu backend NO tiene /cancel en el código que pegaste
-    alert("⚠️ Falta endpoint /pos/orders/<id>/cancel en tu backend (no existe en pos_routes.py).");
+  const cancelBtn = e.target.closest("#btnCancelOrder");
+  if (cancelBtn) {
+    const id = cancelBtn.dataset.orderId || currentDetailOrderId;
+    if (!id) return alert("No se encontró el ID del pedido para anular.");
+
+    const ok = confirm("¿Seguro que quieres ANULAR este pedido?");
+    if (!ok) return;
+
+    const reason = prompt("Motivo (opcional):", "") || "";
+
+    try {
+      const res = await fetch(`/pos/orders/${id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || "No se pudo anular");
+
+      setModalStatus("cancelled");
+      cargarHistorial();
+    } catch (err) {
+      alert(err.message || "Error al anular");
+    }
   }
 });
 
@@ -406,7 +518,7 @@ function setCashUI(open, infoText = "") {
   if (btnOpenCash) btnOpenCash.disabled = open;
   if (btnCloseCash) btnCloseCash.disabled = !open;
 
-  updateChange(); // recalcula habilitación del botón cobrar
+  updateChange();
 }
 
 async function refreshCashStatus() {
@@ -434,7 +546,7 @@ async function openCashRequest(opening_amount, notes = "") {
   const res = await fetch("/pos/cash/open", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ opening_amount, notes })
+    body: JSON.stringify({ opening_amount, notes }),
   });
 
   const data = await res.json().catch(() => ({}));
@@ -443,15 +555,12 @@ async function openCashRequest(opening_amount, notes = "") {
 }
 
 function openCashFlow() {
-  // Si existe modal, úsalo. Si no existe, fallback prompt().
   if (openCashModal && openCashForm && window.bootstrap) {
-    // abrir modal real
     const modal = new bootstrap.Modal(openCashModal, { backdrop: "static", keyboard: false });
     modal.show();
     return;
   }
 
-  // fallback sin modal
   const amountStr = prompt("Monto inicial de caja:", "0");
   if (amountStr === null) return;
 
@@ -462,16 +571,17 @@ function openCashFlow() {
   }
 
   openCashRequest(amount, "")
-    .then(() => refreshCashStatus())
+    .then(async () => {
+      await refreshCashStatus();
+      resetCurrentOrderUI();
+      cargarHistorial();
+    })
     .catch((e) => alert(e.message));
 }
 
-/* Overlay button */
 if (btnOpenCashOverlay) btnOpenCashOverlay.addEventListener("click", openCashFlow);
-/* Top bar button */
 if (btnOpenCash) btnOpenCash.addEventListener("click", openCashFlow);
 
-/* Submit modal (si existe) */
 if (openCashForm) {
   openCashForm.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -493,7 +603,6 @@ if (openCashForm) {
     try {
       await openCashRequest(amount, notes);
 
-      // cerrar modal
       if (openCashModal && window.bootstrap) {
         bootstrap.Modal.getInstance(openCashModal)?.hide();
       }
@@ -502,6 +611,8 @@ if (openCashForm) {
       if (openingNotes) openingNotes.value = "";
 
       await refreshCashStatus();
+      resetCurrentOrderUI();
+      cargarHistorial();
     } catch (err) {
       console.error(err);
       if (openCashError) {
@@ -531,12 +642,14 @@ async function closeCashFlow() {
     const res = await fetch("/pos/cash/close", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ closing_amount })
+      body: JSON.stringify({ closing_amount }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.ok) throw new Error(data.error || "Error al cerrar caja");
 
+    resetCurrentOrderUI();
     await refreshCashStatus();
+    cargarHistorial();
   } catch (e) {
     alert(e.message);
   }
@@ -553,3 +666,7 @@ loadProducts();
 cargarHistorial();
 refreshCashStatus();
 renderOrder();
+
+// ✅ Marca función global para desactivar el fallback del pos.html (si existe)
+window.posRefreshHistory = cargarHistorial;
+window.mostrarDetallePedido = mostrarDetallePedido;

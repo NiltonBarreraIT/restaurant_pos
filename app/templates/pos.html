@@ -45,7 +45,16 @@
       padding: 6px 14px;
       border-radius: 20px;
       font-weight: 600;
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: center;
+      white-space: nowrap;
     }
+
+    /* fila clickeable en historial (fallback) */
+    .history-row { cursor: pointer; }
+    .history-row:hover { background: rgba(25, 135, 84, .06); }
   </style>
 </head>
 
@@ -144,6 +153,10 @@
           </div>
         </div>
 
+        <div class="text-muted small mt-2">
+          * El “# Pedido” corresponde al correlativo por caja (number_in_register).
+        </div>
+
       </div>
     </div>
 
@@ -208,7 +221,10 @@
     <div class="modal-content rounded-4 shadow">
 
       <div class="modal-header bg-light">
-        <h5 class="modal-title fw-bold">🧾 Detalle del pedido</h5>
+        <h5 class="modal-title fw-bold">
+          🧾 Detalle del pedido
+          <span class="text-muted ms-2" id="detailOrderNumber"></span>
+        </h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
 
@@ -257,5 +273,173 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/pos.js') }}"></script>
+
+<!-- ======================================================
+     FALLBACK: historial por caja usando number_in_register
+     (solo se activa si tu pos.js NO define un refresco propio)
+     ✅ FIX: evita /pos/receipt/null seteando orderId global y dataset
+====================================================== -->
+<script>
+(function () {
+  const API_BASE = "/pos"; // ajusta si tu blueprint usa otro prefijo
+  const historialBody = document.getElementById("historialBody");
+  const orderDetailModalEl = document.getElementById("orderDetailModal");
+  const orderDetailModal = orderDetailModalEl ? new bootstrap.Modal(orderDetailModalEl) : null;
+
+  // Si tu pos.js ya maneja historial, no nos metemos.
+  const hasOwnHistory =
+    typeof window.refreshHistory === "function" ||
+    typeof window.loadOrderHistory === "function" ||
+    typeof window.posRefreshHistory === "function" ||
+    typeof window.mostrarDetallePedido === "function";
+
+  if (hasOwnHistory) return;
+
+  function fmtCLP(n) {
+    try { return new Intl.NumberFormat("es-CL").format(Number(n || 0)); }
+    catch { return String(n || 0); }
+  }
+
+  function statusBadge(status) {
+    const s = String(status || "").toLowerCase();
+    if (s === "prep")      return { cls: "bg-warning text-dark", txt: "🟡 En preparación" };
+    if (s === "ready")     return { cls: "bg-info text-dark",    txt: "🔵 Listo" };
+    if (s === "delivered") return { cls: "bg-success",           txt: "✅ Entregado" };
+    if (s === "cancelled") return { cls: "bg-danger",            txt: "❌ Anulado" };
+    if (s === "closed")    return { cls: "bg-secondary",         txt: "🔒 Cerrado" };
+    return { cls: "bg-secondary", txt: status || "—" };
+  }
+
+  async function fetchJSON(url, opts) {
+    const res = await fetch(url, opts);
+    const ct = res.headers.get("content-type") || "";
+    const data = ct.includes("application/json") ? await res.json() : null;
+    if (!res.ok) {
+      const msg = (data && (data.error || data.message)) || ("HTTP " + res.status);
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // ✅ Botones del modal: listener robusto
+  document.addEventListener("click", (e) => {
+    const btnPrint = e.target.closest("#btnPrintTicket");
+    if (btnPrint) {
+      const id = btnPrint.dataset.orderId || window.currentDetailOrderId;
+      if (!id) return alert("No se encontró el ID del pedido para imprimir.");
+      window.open(`${API_BASE}/receipt/${id}`, "_blank");
+      return;
+    }
+
+    const btnCancel = e.target.closest("#btnCancelOrder");
+    if (btnCancel) {
+      const id = btnCancel.dataset.orderId || window.currentDetailOrderId;
+      if (!id) return alert("No se encontró el ID del pedido para anular.");
+      alert("⚠️ Falta endpoint /pos/orders/<id>/cancel en tu backend (no existe en pos_routes.py).");
+    }
+  });
+
+  async function refreshHistoryFallback() {
+    try {
+      const rows = await fetchJSON(`${API_BASE}/orders/history?limit=50`);
+      if (!Array.isArray(rows)) return;
+
+      historialBody.innerHTML = "";
+
+      for (const o of rows) {
+        const orderId = o.id;
+        const numberInRegister = o.number_in_register ?? o.order_number ?? o.id;
+
+        const items = Array.isArray(o.items) ? o.items : [];
+        let prod = "—";
+        if (items.length > 0) {
+          prod = items[0].name || "—";
+          if (items.length > 1) prod += ` (+${items.length - 1})`;
+        }
+
+        const st = statusBadge(o.status);
+        const tr = document.createElement("tr");
+        tr.className = "history-row";
+        tr.dataset.orderId = orderId;
+
+        tr.innerHTML = `
+          <td class="fw-semibold">#${numberInRegister}</td>
+          <td>${prod}</td>
+          <td>${o.created_at || ""}</td>
+          <td class="text-center"><span class="badge ${st.cls}">${st.txt}</span></td>
+        `;
+
+        tr.addEventListener("click", async () => {
+          try {
+            // ✅ set global id (evita null)
+            window.currentDetailOrderId = orderId;
+
+            // ✅ set dataset en botones (evita null)
+            const btnPrint = document.getElementById("btnPrintTicket");
+            if (btnPrint) btnPrint.dataset.orderId = String(orderId);
+
+            const btnCancel = document.getElementById("btnCancelOrder");
+            if (btnCancel) btnCancel.dataset.orderId = String(orderId);
+
+            const detail = await fetchJSON(`${API_BASE}/orders/${orderId}`);
+            const badge = statusBadge(detail.status);
+
+            const detailOrderNumber = document.getElementById("detailOrderNumber");
+            if (detailOrderNumber) {
+              const nin = detail.number_in_register ?? detail.order_number ?? "";
+              detailOrderNumber.textContent = nin ? `#${nin}` : "";
+            }
+
+            const cust = document.getElementById("detailCustomer");
+            if (cust) cust.textContent = detail.reference_name || "";
+
+            const date = document.getElementById("detailDate");
+            if (date) date.textContent = detail.created_at || "";
+
+            const stEl = document.getElementById("detailStatus");
+            if (stEl) {
+              stEl.className = `order-status badge ${badge.cls}`;
+              stEl.textContent = badge.txt;
+            }
+
+            const body = document.getElementById("detailItems");
+            if (body) {
+              body.innerHTML = "";
+              const itemsD = Array.isArray(detail.items) ? detail.items : [];
+              for (const it of itemsD) {
+                const trIt = document.createElement("tr");
+                trIt.innerHTML = `
+                  <td>${it.name || ""}</td>
+                  <td class="text-center">${it.quantity ?? ""}</td>
+                  <td class="text-end">$${fmtCLP(it.unit_price ?? 0)}</td>
+                  <td class="text-end">$${fmtCLP(it.subtotal ?? 0)}</td>
+                `;
+                body.appendChild(trIt);
+              }
+            }
+
+            const tot = document.getElementById("detailTotal");
+            if (tot) tot.textContent = fmtCLP(detail.total ?? 0);
+
+            if (orderDetailModal) orderDetailModal.show();
+          } catch (e) {
+            console.error(e);
+          }
+        });
+
+        historialBody.appendChild(tr);
+      }
+    } catch (e) {
+      historialBody.innerHTML = "";
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    refreshHistoryFallback();
+    setInterval(refreshHistoryFallback, 8000);
+  });
+})();
+</script>
+
 </body>
 </html>
