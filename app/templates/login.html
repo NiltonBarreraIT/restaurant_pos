@@ -38,11 +38,17 @@
             <div class="alert alert-danger mt-3 mb-0">{{ error }}</div>
           {% endif %}
 
-          <!-- DIVISOR -->
+          <!-- LINK A ADMIN INICIAL (solo si BD vacía) -->
           {% if show_bootstrap %}
-            <hr class="my-4">
+            <div class="text-center mt-3">
+              <a class="text-decoration-none fw-semibold" href="#bootstrap-admin">
+                ¿No tienes usuario? <span class="text-primary">Crea el admin inicial aquí</span>
+              </a>
+            </div>
 
-            <!-- CREAR USUARIO INICIAL -->
+            <hr class="my-4">
+            <div id="bootstrap-admin"></div>
+
             <div class="text-center mb-2">
               <span class="badge text-bg-warning">Sistema sin usuarios</span>
               <p class="text-muted small mt-2 mb-0">
@@ -66,9 +72,7 @@
                 <input type="password" name="password" class="form-control" required minlength="4">
               </div>
 
-              <button class="btn btn-dark w-100">
-                🔐 Crear Admin Inicial
-              </button>
+              <button class="btn btn-dark w-100">🔐 Crear Admin Inicial</button>
             </form>
 
             {% if bootstrap_error %}
