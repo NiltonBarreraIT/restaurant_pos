@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Comprobante</title>
+<style>
+  body{font-family:monospace;max-width:320px;margin:auto}
+  h3{text-align:center;margin:10px 0}
+  table{width:100%}
+  td{padding:4px 0}
+  hr{border:none;border-top:1px dashed #000}
+  .total{font-weight:bold;text-align:right}
+</style>
+</head>
+<body>
+
+<h3>🍩 POS Barra</h3>
+
+<p>
+Pedido #{{ order.id }}<br>
+{{ order.created_at.strftime("%Y-%m-%d %H:%M") }}<br>
+Cliente: {{ order.reference_name }}
+</p>
+
+<hr>
+
+<table>
+  {% for i in order.items %}
+  <tr>
+    <td>{{ i.product_name }}</td>
+    <td>x{{ i.quantity }}</td>
+    <td>${{ i.unit_price }}</td>
+  </tr>
+  {% endfor %}
+</table>
+
+<hr>
+
+<p class="total">TOTAL: ${{ total }}</p>
+
+<p style="text-align:center">
+  <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data={{ request.url }}">
+</p>
+
+<p style="text-align:center">Escanea para ver tu comprobante</p>
+
+<script>
+  window.onload = () => window.print();
+</script>
+
+</body>
+</html>
