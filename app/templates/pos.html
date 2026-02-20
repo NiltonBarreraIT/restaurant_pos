@@ -1,126 +1,207 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>POS Barra - Churros</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="UTF-8">
+  <title>POS Barra - Churros</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/pos.css') }}">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/pos.css') }}">
 
-    <style>
-      /* ===== FEEDBACK PRODUCTOS ===== */
-      .product-btn.active {
-        background: #198754 !important;
-        border-color: #198754 !important;
-        transform: scale(1.03);
-      }
+  <style>
+    .product-btn.active {
+      background: #198754 !important;
+      border-color: #198754 !important;
+      transform: scale(1.03);
+    }
+    .product-badge {
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      background: #ffc107;
+      color: #000;
+      font-weight: bold;
+      border-radius: 20px;
+      padding: 2px 8px;
+      font-size: 13px;
+    }
+    #submitOrder:disabled { opacity: .6; cursor: not-allowed; }
 
-      .product-badge {
-        position: absolute;
-        top: 8px;
-        right: 12px;
-        background: #ffc107;
-        color: #000;
-        font-weight: bold;
-        border-radius: 20px;
-        padding: 2px 8px;
-        font-size: 13px;
-      }
+    #cashLockOverlay{
+      position: fixed;
+      inset: 0;
+      background: rgba(248, 249, 250, 0.92);
+      z-index: 1040;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 30px;
+    }
+    #cashLockOverlay .card{ max-width: 420px; border-radius: 16px; }
 
-      /* ===== HISTORIAL ===== */
-      .card-header {
-        cursor: pointer;
-        user-select: none;
-      }
-
-      /* ===== BOTÓN BLOQUEADO ===== */
-      #submitOrder:disabled {
-        opacity: .6;
-        cursor: not-allowed;
-      }
-    </style>
+    .order-status {
+      font-size: 14px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+  </style>
 </head>
 
 <body class="bg-light">
+
+<!-- OVERLAY CAJA -->
+<div id="cashLockOverlay" class="d-flex">
+  <div class="card shadow-lg text-center">
+    <div class="card-body">
+      <div class="display-6 mb-3">🔒</div>
+      <h4 class="fw-bold mb-2">Caja cerrada</h4>
+      <p class="text-muted mb-3">Debes abrir la caja para comenzar a vender.</p>
+      <button class="btn btn-success btn-lg" id="btnOpenCashOverlay">🔓 Abrir caja</button>
+    </div>
+  </div>
+</div>
+
 <div class="container-fluid p-3">
+  <h2 class="mb-3">🍩 POS Barra</h2>
 
-    <h2 class="mb-3">🍩 POS Barra</h2>
+  <div class="d-flex align-items-center justify-content-between mb-3">
+    <div>
+      <span class="badge bg-secondary" id="cashStatusBadge">Caja: CERRADA</span>
+      <span class="text-muted ms-2 small" id="cashStatusInfo"></span>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-success btn-sm" id="btnOpenCash">🔓 Abrir caja</button>
+      <button class="btn btn-outline-danger btn-sm" id="btnCloseCash" disabled>🔒 Cerrar caja</button>
+    </div>
+  </div>
 
-    <!-- Datos -->
+  <div id="posContent">
     <div class="row mb-3">
-        <div class="col-md-4">
-            <label>Nombre cliente</label>
-            <input id="referenceName" class="form-control form-control-lg" placeholder="Ej: Juan">
-        </div>
+      <div class="col-md-4">
+        <label class="form-label">Nombre cliente</label>
+        <input id="referenceName" class="form-control form-control-lg" placeholder="Ej: Juan">
+      </div>
 
-        <div class="col-md-4">
-            <label>Forma de pago</label>
-            <select id="paymentMethod" class="form-select form-select-lg">
-                <option value="Efectivo">Efectivo</option>
-                <option value="Transferencia">Transferencia</option>
-            </select>
-        </div>
+      <div class="col-md-4">
+        <label class="form-label">Forma de pago</label>
+        <!-- IMPORTANTE: valores internos para backend -->
+        <select id="paymentMethod" class="form-select form-select-lg">
+          <option value="cash">Efectivo</option>
+          <option value="transfer">Transferencia</option>
+        </select>
+      </div>
 
-        <div class="col-md-4">
-            <label>Paga con</label>
-            <input id="paidAmount" type="number" class="form-control form-control-lg" placeholder="Ej: 5000">
-        </div>
+      <div class="col-md-4">
+        <label class="form-label">Paga con</label>
+        <input id="paidAmount" type="number" class="form-control form-control-lg" placeholder="Ej: 5000">
+      </div>
+    </div>
+
+    <!-- hint cuando efectivo no alcanza -->
+    <div id="payHint" class="alert alert-warning d-none py-2">
+      ⚠️ En efectivo, el monto pagado debe ser mayor o igual al total.
     </div>
 
     <div class="row">
-        <!-- Productos -->
-        <div class="col-md-7">
-            <h4>Productos</h4>
-            <div id="products" class="row g-3 position-relative"></div>
+      <div class="col-md-7">
+        <h4>Productos</h4>
+        <div id="products" class="row g-3 position-relative"></div>
+      </div>
+
+      <div class="col-md-5">
+        <h4>Pedido</h4>
+        <ul id="orderList" class="list-group mb-3"></ul>
+
+        <div class="p-3 bg-light rounded mb-3">
+          <h5>Total: $<span id="pedidoTotal">0</span></h5>
+          <h6>Vuelto: $<span id="pedidoVuelto">0</span></h6>
         </div>
 
-        <!-- Pedido -->
-        <div class="col-md-5">
-            <h4>Pedido</h4>
-            <ul id="orderList" class="list-group mb-3"></ul>
+        <button id="submitOrder" class="btn btn-success btn-lg w-100" disabled>
+          💰 Cobrar y Enviar
+        </button>
 
-            <div class="p-3 bg-light rounded mb-3">
-                <h5>Total: $<span id="pedidoTotal">0</span></h5>
-                <h6>Vuelto: $<span id="pedidoVuelto">0</span></h6>
-                <small class="text-danger d-none" id="payHint">
-                  ⚠️ El monto pagado es insuficiente
-                </small>
+        <hr class="my-4">
+        <h4 class="mb-2">📜 Últimos pedidos</h4>
+
+        <div class="card">
+          <div class="card-body p-0">
+            <div class="table-responsive" style="max-height: 260px; overflow-y: auto;">
+              <table class="table table-sm table-hover mb-0">
+                <thead class="table-light sticky-top">
+                  <tr>
+                    <th># Pedido</th>
+                    <th>Producto</th>
+                    <th>Hora</th>
+                    <th class="text-center">Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="historialBody"></tbody>
+              </table>
             </div>
-
-            <button id="submitOrder" class="btn btn-success btn-lg w-100" disabled>
-                💰 Cobrar y Enviar
-            </button>
+          </div>
         </div>
+
+      </div>
     </div>
 
-    <!-- HISTORIAL -->
-    <div class="row mt-4">
-        <div class="col-md-7">
-            <div class="card">
-                <div class="card-header" id="toggleHistory">
-                    🧾 Últimos pedidos
-                </div>
-                <div class="card-body p-2" id="historyBody" style="max-height:220px; overflow-y:auto;">
-                    <table class="table table-sm mb-0">
-                        <thead>
-                            <tr>
-                                <th>Hora</th>
-                                <th>Cliente</th>
-                                <th>Total</th>
-                            </tr>
-                        </thead>
-                        <tbody id="historialBody"></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-5"></div>
-    </div>
-
+  </div>
 </div>
 
-<!-- MODALES Y AUDIO (SIN CAMBIOS) -->
+<!-- MODAL ABRIR CAJA -->
+<div class="modal fade" id="openCashModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="openCashForm">
+      <div class="modal-header">
+        <h5 class="modal-title">🔓 Abrir caja</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div id="openCashError" class="alert alert-danger d-none"></div>
+
+        <label class="form-label">Monto inicial</label>
+        <input id="openingAmount" type="number" class="form-control" value="0" min="0">
+
+        <label class="form-label mt-3">Notas (opcional)</label>
+        <textarea id="openingNotes" class="form-control" rows="2" placeholder="Ej: Cambio inicial..."></textarea>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-success">Abrir caja</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- MODAL CERRAR CAJA -->
+<div class="modal fade" id="closeCashModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <form class="modal-content" id="closeCashForm">
+      <div class="modal-header">
+        <h5 class="modal-title">🔒 Cerrar caja</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+
+      <div class="modal-body">
+        <div id="closeCashError" class="alert alert-danger d-none"></div>
+
+        <label class="form-label">Monto de cierre</label>
+        <input id="closingAmount" type="number" class="form-control" value="0" min="0">
+        <div class="text-muted small mt-2">Ingresa el efectivo contado al cierre.</div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="submit" class="btn btn-danger">Cerrar caja</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- MODAL DETALLE PEDIDO -->
 <div class="modal fade" id="orderDetailModal" tabindex="-1">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -132,20 +213,18 @@
       </div>
 
       <div class="modal-body">
-
-        <div class="row mb-3">
-          <div class="col-md-6">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
             <div class="text-muted small">Cliente</div>
             <div class="fw-semibold" id="detailCustomer"></div>
+            <div class="text-muted small" id="detailDate"></div>
           </div>
-          <div class="col-md-6 text-md-end">
-            <div class="text-muted small">Fecha</div>
-            <div class="fw-semibold" id="detailDate"></div>
-          </div>
+
+          <span id="detailStatus" class="order-status bg-warning text-dark">🟡 En preparación</span>
         </div>
 
         <div class="table-responsive">
-          <table class="table table-sm align-middle">
+          <table class="table table-sm">
             <thead class="table-light">
               <tr>
                 <th>Producto</th>
@@ -158,22 +237,14 @@
           </table>
         </div>
 
-        <div class="d-flex justify-content-end mt-3">
-          <div class="fs-5 fw-bold">
-            Total: $<span id="detailTotal"></span>
-          </div>
+        <div class="d-flex justify-content-end fs-5 fw-bold">
+          Total: $<span id="detailTotal"></span>
         </div>
-
       </div>
 
       <div class="modal-footer d-flex justify-content-between">
-        <button class="btn btn-outline-danger" id="btnCancelOrder">
-          ❌ Anular pedido
-        </button>
-
-        <button class="btn btn-primary" id="btnPrintTicket">
-          🖨️ Imprimir ticket (QR)
-        </button>
+        <button class="btn btn-outline-danger" id="btnCancelOrder">❌ Anular pedido</button>
+        <button class="btn btn-primary" id="btnPrintTicket">🖨️ Imprimir ticket (QR)</button>
       </div>
 
     </div>
@@ -186,6 +257,5 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="{{ url_for('static', filename='js/pos.js') }}"></script>
-
 </body>
 </html>

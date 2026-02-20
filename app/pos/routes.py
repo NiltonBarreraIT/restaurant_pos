@@ -1,37 +1,168 @@
 from decimal import Decimal
+from datetime import datetime
+
 from flask import request, jsonify, render_template
 from flask_login import login_required, current_user
-from ..extensions import db
-from ..models import Product, Order, OrderItem, Payment, OrderStatus, PaymentMethod
-from ..utils import require_roles
+
+from app.extensions import db
+from app.models import Order
+from app.utils import require_roles
 from . import pos_bp
 
+
+# ======================================================
+# CAJA
+# ======================================================
+def get_open_cash_register():
+    from app.models import CashRegister, CashRegisterStatus
+    return (
+        CashRegister.query
+        .filter(CashRegister.status == CashRegisterStatus.OPEN.value)
+        .order_by(CashRegister.opened_at.desc())
+        .first()
+    )
+
+
+@pos_bp.get("/cash/status")
+@login_required
+@require_roles("admin", "cashier")
+def cash_status():
+    from app.models import CashRegister
+
+    cr = CashRegister.query.order_by(CashRegister.id.desc()).first()
+
+    if not cr:
+        return jsonify({"ok": True, "open": False, "cash_register": None})
+
+    is_open = (cr.status or "").lower() == "open"
+
+    return jsonify({
+        "ok": True,
+        "open": is_open,
+        "cash_register": {
+            "id": cr.id,
+            "status": cr.status,
+            "opened_at": cr.opened_at.strftime("%Y-%m-%d %H:%M") if cr.opened_at else None,
+            "closed_at": cr.closed_at.strftime("%Y-%m-%d %H:%M") if cr.closed_at else None,
+            "opening_amount": float(cr.opening_amount or 0),
+            "opened_by_id": cr.opened_by_id
+        }
+    })
+
+
+@pos_bp.post("/cash/open")
+@login_required
+@require_roles("admin", "cashier")
+def cash_open():
+    from app.models import CashRegister, CashRegisterStatus
+
+    data = request.get_json(force=True) or {}
+    opening_amount = Decimal(str(data.get("opening_amount") or "0"))
+    notes = (data.get("notes") or "").strip() or None
+
+    if get_open_cash_register():
+        return jsonify({"ok": False, "error": "Ya existe una caja abierta"}), 400
+
+    cr = CashRegister(
+        status=CashRegisterStatus.OPEN.value,  # ✅ string
+        opened_at=datetime.utcnow(),
+        opened_by_id=current_user.id,
+        opening_amount=opening_amount,
+        notes=notes
+    )
+
+    db.session.add(cr)
+    db.session.commit()
+
+    return jsonify({"ok": True, "cash_register_id": cr.id}), 201
+
+
+@pos_bp.post("/cash/close")
+@login_required
+@require_roles("admin", "cashier")
+def cash_close():
+    from app.models import (
+        OrderStatus,
+        PaymentMethod,
+        CashRegisterStatus
+    )
+
+    data = request.get_json(force=True) or {}
+    closing_amount = Decimal(str(data.get("closing_amount") or "0"))
+
+    cr = get_open_cash_register()
+    if not cr:
+        return jsonify({"ok": False, "error": "No hay caja abierta"}), 400
+
+    orders_q = Order.query.filter_by(cash_register_id=cr.id)
+
+    orders_ok = orders_q.filter(Order.status != OrderStatus.CANCELLED.value).all()
+    orders_cancelled = orders_q.filter(Order.status == OrderStatus.CANCELLED.value).count()
+
+    total_cash = Decimal("0")
+    total_transfer = Decimal("0")
+    total_sales = Decimal("0")
+
+    for o in orders_ok:
+        for pay in o.payments:
+            amt = Decimal(str(pay.amount))
+            if pay.method == PaymentMethod.CASH.value:
+                total_cash += amt
+            elif pay.method == PaymentMethod.TRANSFER.value:
+                total_transfer += amt
+            total_sales += amt
+
+    cr.status = CashRegisterStatus.CLOSED.value  # ✅ string
+    cr.closed_at = datetime.utcnow()
+    cr.closed_by_id = current_user.id
+    cr.closing_amount = closing_amount
+    cr.total_cash = total_cash
+    cr.total_transfer = total_transfer
+    cr.total_sales = total_sales
+    cr.total_orders = len(orders_ok)
+    cr.total_cancelled = orders_cancelled
+
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+# ======================================================
+# PRODUCTOS
+# ======================================================
 @pos_bp.get("/products")
 @login_required
 def list_products():
-    products = Product.query.filter_by(active=True).order_by(Product.category.asc(), Product.name.asc()).all()
-    return jsonify([{
-        "id": p.id,
-        "name": p.name,
-        "category": p.category,
-        "price": float(p.price),
-    } for p in products])
+    from app.models import Product
 
+    products = (
+        Product.query
+        .filter_by(active=True)
+        .order_by(Product.category.asc(), Product.name.asc())
+        .all()
+    )
+
+    return jsonify([
+        {"id": p.id, "name": p.name, "category": p.category, "price": float(p.price)}
+        for p in products
+    ])
+
+
+# ======================================================
+# CREAR PEDIDO
+# ======================================================
 @pos_bp.post("/orders")
 @login_required
 @require_roles("admin", "cashier")
 def create_order():
-    """
-    Cobramos ANTES.
-    Payload:
-    {
-      "reference_name": "Juan",
-      "notes": "",
-      "items": [{"product_id": 1, "qty": 2, "notes": ""}],
-      "payment": {"method": "cash"|"transfer", "amount": 4500, "reference": "1234"}
-    }
-    """
-    data = request.get_json(force=True)
+    from app.models import (
+        Product,
+        OrderItem,
+        Payment,
+        OrderStatus,
+        PaymentMethod
+    )
+
+    data = request.get_json(force=True) or {}
 
     reference_name = (data.get("reference_name") or "").strip()
     if not reference_name:
@@ -46,219 +177,114 @@ def create_order():
     if method not in (PaymentMethod.CASH.value, PaymentMethod.TRANSFER.value):
         return jsonify({"ok": False, "error": "payment.method inválido"}), 400
 
-    # Crear Order
+    cr = get_open_cash_register()
+    if not cr:
+        return jsonify({"ok": False, "error": "Caja cerrada"}), 400
+
     order = Order(
         reference_name=reference_name,
         status=OrderStatus.PREP.value,
         created_by_id=current_user.id,
-        notes=(data.get("notes") or "").strip() or None
+        cash_register_id=cr.id
     )
 
-    # Items (snapshot de nombre y precio)
     total = Decimal("0.00")
-    for it in items_in:
-        pid = it.get("product_id")
-        qty = int(it.get("qty") or 0)
-        if not pid or qty <= 0:
-            return jsonify({"ok": False, "error": "Cada item requiere product_id y qty > 0"}), 400
 
-        p = Product.query.get(pid)
-        if not p or not p.active:
-            return jsonify({"ok": False, "error": f"Producto inválido: {pid}"}), 400
+    for it in items_in:
+        p = Product.query.get(it.get("product_id"))
+        qty = int(it.get("qty") or 0)
+
+        if not p or qty <= 0:
+            return jsonify({"ok": False, "error": "Producto inválido"}), 400
 
         unit_price = Decimal(str(p.price))
-        oi = OrderItem(
-            product_id=p.id,
-            product_name=p.name,
-            unit_price=unit_price,
-            quantity=qty,
-            notes=(it.get("notes") or "").strip() or None
+
+        order.items.append(
+            OrderItem(
+                product_id=p.id,
+                product_name=p.name,
+                unit_price=unit_price,
+                quantity=qty
+            )
         )
-        order.items.append(oi)
+
         total += unit_price * qty
 
-    # Pago: por defecto debe coincidir con total (podemos permitir exactitud/ajuste luego)
     amount = Decimal(str(pay.get("amount") or "0"))
     if amount != total:
-        return jsonify({"ok": False, "error": f"Monto de pago no coincide con total. total={float(total)}"}), 400
+        return jsonify({"ok": False, "error": "Monto incorrecto"}), 400
 
-    payment = Payment(
-        method=method,
-        amount=amount,
-        reference=(pay.get("reference") or "").strip() or None
-    )
-    order.payments.append(payment)
+    order.payments.append(Payment(method=method, amount=amount))
 
     db.session.add(order)
     db.session.commit()
 
-    return jsonify({"ok": True, "order_id": order.id, "total": float(total)}), 201
+    return jsonify({"ok": True, "order_id": order.id})
 
-@pos_bp.get("/kitchen/queue")
+
+@pos_bp.get("/orders/history")
 @login_required
-@require_roles("admin", "kitchen", "cashier")
-def kitchen_queue():
-    orders = Order.query.filter(Order.status.in_([OrderStatus.PREP.value, OrderStatus.READY.value])) \
-        .order_by(Order.created_at.asc()).all()
+def orders_history():
+    limit = int(request.args.get("limit", 50))
+    orders = Order.query.order_by(Order.id.desc()).limit(limit).all()
 
     out = []
     for o in orders:
         out.append({
             "id": o.id,
-            "reference_name": o.reference_name,
-            "status": o.status,
-            "created_at": o.created_at.isoformat(),
-            "items": [{
-                "name": i.product_name,
-                "qty": i.quantity,
-                "notes": i.notes
-            } for i in o.items]
+            "created_at": o.created_at.strftime("%Y-%m-%d %H:%M") if o.created_at else "",
+            "status": str(o.status or ""),
+            "total": float(o.total_amount()),
+            "items": [
+                {"name": it.product_name, "qty": int(it.quantity)}
+                for it in (o.items or [])
+            ]
         })
+
     return jsonify(out)
 
-@pos_bp.post("/orders/<int:order_id>/status")
-@login_required
-@require_roles("admin", "kitchen", "cashier")
-def set_order_status(order_id: int):
-    data = request.get_json(force=True)
-    status = (data.get("status") or "").strip()
-
-    if status not in (OrderStatus.PREP.value, OrderStatus.READY.value, OrderStatus.DELIVERED.value, OrderStatus.CANCELLED.value):
-        return jsonify({"ok": False, "error": "status inválido"}), 400
-
-    o = Order.query.get_or_404(order_id)
-    o.status = status
-    db.session.commit()
-    return jsonify({"ok": True})
-
-@pos_bp.get("/reports/daily")
-@login_required
-@require_roles("admin", "cashier")
-def report_daily():
-    """
-    Reporte simple por fecha:
-    /pos/reports/daily?date=2026-01-05
-    """
-    from datetime import datetime, timedelta
-
-    date_str = (request.args.get("date") or "").strip()
-    if not date_str:
-        return jsonify({"ok": False, "error": "date es obligatorio (YYYY-MM-DD)"}), 400
-
-    day = datetime.fromisoformat(date_str)
-    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
-    end = start + timedelta(days=1)
-
-    orders = Order.query.filter(Order.created_at >= start, Order.created_at < end, Order.status != OrderStatus.CANCELLED.value).all()
-
-    total_cash = Decimal("0")
-    total_transfer = Decimal("0")
-    total_orders = len(orders)
-    total_sales = Decimal("0")
-
-    products_counter = {}
-
-    for o in orders:
-        for pay in o.payments:
-            if pay.method == PaymentMethod.CASH.value:
-                total_cash += Decimal(str(pay.amount))
-            elif pay.method == PaymentMethod.TRANSFER.value:
-                total_transfer += Decimal(str(pay.amount))
-            total_sales += Decimal(str(pay.amount))
-
-        for it in o.items:
-            products_counter[it.product_name] = products_counter.get(it.product_name, 0) + int(it.quantity)
-
-    top_products = sorted(products_counter.items(), key=lambda x: x[1], reverse=True)
-
-    return jsonify({
-        "ok": True,
-        "date": date_str,
-        "orders": total_orders,
-        "cash": float(total_cash),
-        "transfer": float(total_transfer),
-        "total": float(total_sales),
-        "top_products": [{"name": n, "qty": q} for n, q in top_products[:20]]
-    })
-
-@pos_bp.get("/ui")
-@login_required
-def pos_ui():
-    return render_template("pos.html")
-
-@pos_bp.get("/orders/history")
-@login_required
-def orders_history():
-    print("HISTORY CALLED")
-    limit = request.args.get("limit", 20, type=int)
-
-    orders = (
-        Order.query
-        .order_by(Order.created_at.desc())
-        .limit(limit)
-        .all()
-    )
-
-    return jsonify([
-    {
-        "id": o.id,
-        "reference_name": o.reference_name,
-        "total": float(sum(i.unit_price * i.quantity for i in o.items)),
-        "created_at": o.created_at.strftime("%Y-%m-%d %H:%M"),
-        "status": o.status,  # 👈 CLAVE
-    }
-    for o in orders
-])
 
 @pos_bp.get("/orders/<int:order_id>")
 @login_required
-def order_detail(order_id):
+def get_order_detail(order_id):
     order = Order.query.get_or_404(order_id)
 
     return jsonify({
         "id": order.id,
         "reference_name": order.reference_name,
+        "status": order.status,
         "created_at": order.created_at.strftime("%Y-%m-%d %H:%M"),
+        "total": float(order.total_amount()),
         "items": [
             {
-                "name": i.product.name,
-                "qty": i.quantity,
-                "price": float(i.unit_price),
-                "subtotal": float(i.unit_price * i.quantity)
+                "name": item.product_name,
+                "quantity": item.quantity,
+                "unit_price": float(item.unit_price),
+                "subtotal": float(Decimal(str(item.unit_price)) * Decimal(str(item.quantity)))
             }
-            for i in order.items
-        ],
-        "total": float(sum(i.unit_price * i.quantity for i in order.items))
+            for item in order.items
+        ]
     })
 
-@pos_bp.post("/orders/<int:order_id>/cancel")
-@login_required
-def cancel_order(order_id):
-    order = Order.query.get_or_404(order_id)
-
-    # 🔁 Si ya está cancelado, no es error
-    if order.status == "CANCELLED":
-        return jsonify({
-            "status": "already_cancelled",
-            "message": "Pedido ya estaba anulado"
-        }), 200
-
-    # ✅ Anular pedido
-    order.status = "CANCELLED"
-    db.session.commit()
-
-    return jsonify({
-        "status": "cancelled",
-        "message": "Pedido anulado correctamente"
-    }), 200
 
 @pos_bp.get("/receipt/<int:order_id>")
+@login_required
 def receipt(order_id):
     order = Order.query.get_or_404(order_id)
-    total = sum(i.unit_price * i.quantity for i in order.items)
+    total = order.total_amount()
+    return render_template("receipt.html", order=order, total=total)
 
-    return render_template(
-        "receipt.html",
-        order=order,
-        total=total
-    )
+
+@pos_bp.get("/q/order/<int:order_id>")
+def qr_order_status(order_id):
+    order = Order.query.get_or_404(order_id)
+    return render_template("qr_status.html", order=order)
+
+
+# ======================================================
+# UI
+# ======================================================
+@pos_bp.get("/ui")
+@login_required
+def pos_ui():
+    return render_template("pos.html")
