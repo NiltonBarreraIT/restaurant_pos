@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Panel Cocina | POS</title>
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+
+  <style>
+    .pedido-card { border: 0; border-radius: 14px; }
+    .pedido-card .card-header { border-top-left-radius: 14px; border-top-right-radius: 14px; }
+    .pedido-card .card-footer { border-bottom-left-radius: 14px; border-bottom-right-radius: 14px; }
+    .item-row { font-size: 0.95rem; }
+
+    /* Resumen */
+    .resumen-card { border: 0; border-radius: 14px; }
+    .resumen-item { font-size: 0.95rem; }
+    .resumen-item .qty { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+
+<body class="bg-light">
+
+  <nav class="navbar navbar-expand-lg bg-white border-bottom">
+    <div class="container-fluid">
+      <span class="navbar-brand fw-bold text-primary">
+        <i class="bi bi-fire"></i> Panel Cocina
+      </span>
+
+      <div class="d-flex gap-2 align-items-center">
+        <a class="btn btn-outline-secondary btn-sm" href="/pos">
+          <i class="bi bi-arrow-left"></i> Volver al POS
+        </a>
+
+        <button class="btn btn-outline-primary btn-sm" id="btnRefresh">
+          <i class="bi bi-arrow-clockwise"></i> Actualizar
+        </button>
+
+        <span class="small text-muted" id="connStatus"></span>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid mt-4 mb-5">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+      <div>
+        <h3 class="fw-bold text-primary mb-1">Pedidos activos</h3>
+        <p class="text-muted mb-0">
+          Auto-refresh cada 5s
+          <span class="badge bg-light text-dark ms-2" id="lastUpdateBadge">--</span>
+        </p>
+      </div>
+    </div>
+
+    <!-- ✅ Resumen Producción (solo EN_PREPARACION) -->
+    <div class="card shadow-sm resumen-card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div class="fw-bold text-primary">
+            <i class="bi bi-clipboard-check me-1"></i> Resumen producción (EN_PREPARACIÓN)
+          </div>
+          <div class="text-muted small">
+            Total unidades: <span class="badge bg-primary" id="resumenTotal">0</span>
+          </div>
+        </div>
+
+        <hr class="my-3">
+
+        <!-- lista -->
+        <div class="row g-2" id="resumenGrid">
+          <!-- items dinámicos -->
+        </div>
+
+        <!-- estado vacío -->
+        <div class="text-muted small d-none" id="resumenEmpty">
+          No hay productos en preparación.
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3" id="kitchenGrid"></div>
+
+    <div class="text-center text-muted mt-4 d-none" id="emptyState">
+      <i class="bi bi-check2-circle" style="font-size: 2rem;"></i>
+      <div class="mt-2">No hay pedidos activos 🎉</div>
+    </div>
+  </div>
+
+  <script src="/static/js/cocina.js"></script>
+</body>
+</html>

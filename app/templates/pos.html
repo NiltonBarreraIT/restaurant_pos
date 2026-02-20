@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/pos.css') }}">
 
   <style>
@@ -272,28 +273,33 @@
 </audio>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- ✅ FORZAMOS que el historial lo pinte ESTE HTML (fallback) aunque exista pos.js -->
+<script>
+  window.FORCE_POS_HISTORY_FALLBACK = true;
+</script>
+
 <script src="{{ url_for('static', filename='js/pos.js') }}"></script>
 
 <!-- ======================================================
      FALLBACK: historial por caja usando number_in_register
-     (solo se activa si tu pos.js NO define un refresco propio)
-     ✅ FIX: evita /pos/receipt/null seteando orderId global y dataset
+     (ahora se puede forzar con window.FORCE_POS_HISTORY_FALLBACK = true)
 ====================================================== -->
 <script>
 (function () {
-  const API_BASE = "/pos"; // ajusta si tu blueprint usa otro prefijo
+  const API_BASE = "/pos";
   const historialBody = document.getElementById("historialBody");
   const orderDetailModalEl = document.getElementById("orderDetailModal");
   const orderDetailModal = orderDetailModalEl ? new bootstrap.Modal(orderDetailModalEl) : null;
 
-  // Si tu pos.js ya maneja historial, no nos metemos.
   const hasOwnHistory =
     typeof window.refreshHistory === "function" ||
     typeof window.loadOrderHistory === "function" ||
     typeof window.posRefreshHistory === "function" ||
     typeof window.mostrarDetallePedido === "function";
 
-  if (hasOwnHistory) return;
+  // ✅ Solo nos salimos si NO está forzado
+  if (hasOwnHistory && !window.FORCE_POS_HISTORY_FALLBACK) return;
 
   function fmtCLP(n) {
     try { return new Intl.NumberFormat("es-CL").format(Number(n || 0)); }
@@ -303,10 +309,9 @@
   function statusBadge(status) {
     const s = String(status || "").toLowerCase();
     if (s === "prep")      return { cls: "bg-warning text-dark", txt: "🟡 En preparación" };
-    if (s === "ready")     return { cls: "bg-info text-dark",    txt: "🔵 Listo" };
-    if (s === "delivered") return { cls: "bg-success",           txt: "✅ Entregado" };
+    if (s === "ready")     return { cls: "bg-success",           txt: "✅ Listo" };
+    if (s === "closed")    return { cls: "bg-secondary",         txt: "📦 Entregado" };
     if (s === "cancelled") return { cls: "bg-danger",            txt: "❌ Anulado" };
-    if (s === "closed")    return { cls: "bg-secondary",         txt: "🔒 Cerrado" };
     return { cls: "bg-secondary", txt: status || "—" };
   }
 
@@ -321,7 +326,23 @@
     return data;
   }
 
-  // ✅ Botones del modal: listener robusto
+  async function marcarEntregado(orderId) {
+    const ok = confirm("¿Confirmas que el cliente retiró el pedido?");
+    if (!ok) return;
+
+    try {
+      await fetchJSON(`/cocina/api/pedidos/${orderId}/estado`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ estado: "ENTREGADO" })
+      });
+      await refreshHistoryFallback();
+    } catch (e) {
+      console.error(e);
+      alert(e.message || "No se pudo marcar como entregado");
+    }
+  }
+
   document.addEventListener("click", (e) => {
     const btnPrint = e.target.closest("#btnPrintTicket");
     if (btnPrint) {
@@ -358,6 +379,22 @@
         }
 
         const st = statusBadge(o.status);
+
+        const isReady = String(o.status || "").toLowerCase() === "ready";
+        const estadoHtml = isReady
+          ? `
+              <div class="d-grid gap-1 justify-content-center">
+                <span class="badge ${st.cls}">${st.txt}</span>
+                <button type="button"
+                        class="btn btn-sm btn-dark"
+                        data-action="entregar"
+                        data-order-id="${orderId}">
+                  <i class="bi bi-bag-check"></i> Entregar
+                </button>
+              </div>
+            `
+          : `<span class="badge ${st.cls}">${st.txt}</span>`;
+
         const tr = document.createElement("tr");
         tr.className = "history-row";
         tr.dataset.orderId = orderId;
@@ -366,15 +403,15 @@
           <td class="fw-semibold">#${numberInRegister}</td>
           <td>${prod}</td>
           <td>${o.created_at || ""}</td>
-          <td class="text-center"><span class="badge ${st.cls}">${st.txt}</span></td>
+          <td class="text-center">${estadoHtml}</td>
         `;
 
-        tr.addEventListener("click", async () => {
+        tr.addEventListener("click", async (ev) => {
+          if (ev.target.closest('button[data-action="entregar"]')) return;
+
           try {
-            // ✅ set global id (evita null)
             window.currentDetailOrderId = orderId;
 
-            // ✅ set dataset en botones (evita null)
             const btnPrint = document.getElementById("btnPrintTicket");
             if (btnPrint) btnPrint.dataset.orderId = String(orderId);
 
@@ -433,6 +470,16 @@
       historialBody.innerHTML = "";
     }
   }
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest('button[data-action="entregar"]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const id = btn.dataset.orderId;
+    if (!id) return;
+    marcarEntregado(id);
+  });
 
   document.addEventListener("DOMContentLoaded", () => {
     refreshHistoryFallback();
