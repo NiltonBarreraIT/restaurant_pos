@@ -180,3 +180,13 @@ class CashRegister(db.Model):
 
     def __repr__(self):
         return f"<CashRegister id={self.id} status={self.status}>"
+
+from datetime import datetime
+from app.extensions import db  # ajusta el import según tu proyecto
+
+class AppSetting(db.Model):
+    __tablename__ = "app_settings"
+
+    key = db.Column(db.String(80), primary_key=True)
+    value = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

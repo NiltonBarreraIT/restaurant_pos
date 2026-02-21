@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Backoffice | Usuarios</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .td-actions { white-space: nowrap; }
+  </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/admin">🧾 Backoffice</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navAdmin">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navAdmin">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/admin">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/settings">Configuración</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/cash">Caja</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/products/ui">Productos</a></li>
+        <li class="nav-item"><a class="nav-link active" href="/admin/users/ui">Usuarios</a></li>
+        <li class="nav-item"><a class="nav-link" href="/pos">POS</a></li>
+        <li class="nav-item"><a class="nav-link" href="/cocina">Cocina</a></li>
+      </ul>
+
+      <span class="navbar-text text-light small">
+        {{ business_name }}
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4">
+
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h3 class="fw-bold mb-0">Usuarios (PRO)</h3>
+      <div class="text-muted">Crear, roles, activar/desactivar y reset de contraseña.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary" id="btnReload">Actualizar</button>
+      <a class="btn btn-secondary" href="/admin">Volver</a>
+    </div>
+  </div>
+
+  <div id="alertBox"></div>
+
+  <!-- Filtros -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Buscar</label>
+          <input class="form-control" id="q" placeholder="Usuario o email...">
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label">Rol</label>
+          <select class="form-select" id="role">
+            <option value="">Todos</option>
+            <option value="admin">admin</option>
+            <option value="cashier">cashier</option>
+            <option value="kitchen">kitchen</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label">Activo</label>
+          <select class="form-select" id="active">
+            <option value="">Todos</option>
+            <option value="1">Activos</option>
+            <option value="0">Inactivos</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-md-2 d-grid">
+          <button class="btn btn-primary" id="btnSearch">Filtrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crear usuario -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="fw-bold mb-2">➕ Crear usuario</div>
+      <div class="row g-2">
+        <div class="col-12 col-md-3">
+          <input class="form-control mono" id="newUsername" placeholder="username *">
+        </div>
+        <div class="col-12 col-md-3">
+          <input class="form-control" id="newEmail" placeholder="email (opcional)">
+        </div>
+        <div class="col-12 col-md-2">
+          <select class="form-select mono" id="newRole">
+            <option value="cashier">cashier</option>
+            <option value="kitchen">kitchen</option>
+            <option value="admin">admin</option>
+          </select>
+        </div>
+        <div class="col-12 col-md-3">
+          <input class="form-control mono" id="newPassword" placeholder="password *" type="password">
+        </div>
+        <div class="col-12 col-md-1 d-grid">
+          <button class="btn btn-success" id="btnCreate">Crear</button>
+        </div>
+      </div>
+      <div class="text-muted small mt-2">* username y password obligatorios. Mínimo 4 caracteres.</div>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Usuario</th>
+              <th>Email</th>
+              <th>Rol</th>
+              <th>Estado</th>
+              <th class="td-actions text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="text-muted small">
+        Protecciones: no puedes desactivarte y no puedes desactivar el último admin.
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal reset password -->
+<div class="modal fade" id="resetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div class="fw-bold">Reset password</div>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div class="small text-muted mb-2">Usuario: <span class="mono" id="resetUserLabel">-</span></div>
+        <input class="form-control mono" id="resetPassword" type="password" placeholder="Nueva contraseña (mínimo 4)">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" id="btnDoReset">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const alertBox = $("alertBox");
+  const tbody = $("tbody");
+
+  const q = $("q");
+  const role = $("role");
+  const active = $("active");
+  const btnSearch = $("btnSearch");
+  const btnReload = $("btnReload");
+
+  const newUsername = $("newUsername");
+  const newEmail = $("newEmail");
+  const newRole = $("newRole");
+  const newPassword = $("newPassword");
+  const btnCreate = $("btnCreate");
+
+  const resetModalEl = $("resetModal");
+  const resetUserLabel = $("resetUserLabel");
+  const resetPassword = $("resetPassword");
+  const btnDoReset = $("btnDoReset");
+
+  let currentResetUserId = null;
+  let currentResetUsername = null;
+
+  function showAlert(type, msg){
+    alertBox.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    setTimeout(() => { alertBox.innerHTML = ""; }, 4000);
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+  }
+
+  function badgeRole(r){
+    const rr = (r || "").toLowerCase();
+    if (rr === "admin") return `<span class="badge bg-danger">admin</span>`;
+    if (rr === "kitchen") return `<span class="badge bg-warning text-dark">kitchen</span>`;
+    return `<span class="badge bg-primary">cashier</span>`;
+  }
+
+  function badgeActive(isActive){
+    return isActive
+      ? `<span class="badge bg-success">Activo</span>`
+      : `<span class="badge bg-secondary">Inactivo</span>`;
+  }
+
+  async function loadUsers(){
+    const params = new URLSearchParams();
+    if (q.value.trim()) params.set("q", q.value.trim());
+    if (role.value) params.set("role", role.value);
+    if (active.value) params.set("active", active.value);
+
+    const r = await fetch("/admin/users?" + params.toString());
+    const j = await r.json();
+
+    if (!j.ok){
+      showAlert("danger", j.error || "No se pudo cargar usuarios");
+      return;
+    }
+
+    tbody.innerHTML = (j.items || []).map(renderRow).join("");
+  }
+
+  function renderRow(u){
+    const canToggle = !u.is_me; // no permitir desactivar uno mismo (backend también lo bloquea)
+    const btnToggle = u.is_active
+      ? `<button class="btn btn-sm btn-outline-secondary" ${canToggle ? "" : "disabled"} onclick="setActive(${u.id}, false)">Desactivar</button>`
+      : `<button class="btn btn-sm btn-outline-success" onclick="setActive(${u.id}, true)">Activar</button>`;
+
+    return `
+      <tr data-id="${u.id}">
+        <td class="mono">${u.id}</td>
+        <td class="mono">${escapeHtml(u.username)}</td>
+        <td>
+          <input class="form-control form-control-sm" value="${escapeHtml(u.email || "")}" data-field="email" placeholder="(sin email)">
+        </td>
+        <td>
+          <select class="form-select form-select-sm mono" data-field="role">
+            <option value="admin" ${u.role === "admin" ? "selected" : ""}>admin</option>
+            <option value="cashier" ${u.role === "cashier" ? "selected" : ""}>cashier</option>
+            <option value="kitchen" ${u.role === "kitchen" ? "selected" : ""}>kitchen</option>
+          </select>
+          <div class="mt-1">${badgeRole(u.role)}</div>
+        </td>
+        <td>${badgeActive(u.is_active)}</td>
+        <td class="td-actions text-end">
+          <button class="btn btn-sm btn-primary" onclick="saveUser(${u.id})">Guardar</button>
+          ${btnToggle}
+          <button class="btn btn-sm btn-outline-dark" onclick="openReset(${u.id}, '${escapeHtml(u.username)}')">Reset pass</button>
+        </td>
+      </tr>
+    `;
+  }
+
+  function getRowData(id){
+    const tr = tbody.querySelector(`tr[data-id="${id}"]`);
+    const email = tr.querySelector(`[data-field="email"]`).value;
+    const role = tr.querySelector(`[data-field="role"]`).value;
+    return { email, role };
+  }
+
+  async function saveUser(id){
+    const data = getRowData(id);
+    const payload = {
+      email: (data.email || "").trim() || null,
+      role: (data.role || "").trim()
+    };
+
+    const r = await fetch(`/admin/users/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo guardar");
+      return;
+    }
+
+    showAlert("success", "✅ Usuario actualizado");
+    await loadUsers();
+  }
+
+  async function setActive(id, value){
+    const r = await fetch(`/admin/users/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !!value })
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo cambiar estado");
+      return;
+    }
+
+    showAlert("success", value ? "✅ Activado" : "✅ Desactivado");
+    await loadUsers();
+  }
+
+  async function createUser(){
+    const payload = {
+      username: (newUsername.value || "").trim(),
+      email: (newEmail.value || "").trim() || null,
+      role: (newRole.value || "cashier").trim(),
+      password: (newPassword.value || "")
+    };
+
+    if (!payload.username || !payload.password){
+      showAlert("warning", "username y password obligatorios");
+      return;
+    }
+    if (payload.password.length < 4){
+      showAlert("warning", "Password mínimo 4");
+      return;
+    }
+
+    const r = await fetch("/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo crear");
+      return;
+    }
+
+    showAlert("success", "✅ Usuario creado");
+    newUsername.value = "";
+    newEmail.value = "";
+    newPassword.value = "";
+    newRole.value = "cashier";
+    await loadUsers();
+  }
+
+  function openReset(userId, username){
+    currentResetUserId = userId;
+    currentResetUsername = username;
+    resetUserLabel.textContent = username;
+    resetPassword.value = "";
+
+    const modal = bootstrap.Modal.getOrCreateInstance(resetModalEl);
+    modal.show();
+
+    setTimeout(() => resetPassword.focus(), 200);
+  }
+
+  btnDoReset.addEventListener("click", async () => {
+    const pass = (resetPassword.value || "");
+    if (pass.length < 4){
+      showAlert("warning", "Password mínimo 4");
+      return;
+    }
+
+    const r = await fetch(`/admin/users/${currentResetUserId}/reset_password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pass })
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo resetear password");
+      return;
+    }
+
+    showAlert("success", `✅ Password actualizado (${currentResetUsername})`);
+    bootstrap.Modal.getOrCreateInstance(resetModalEl).hide();
+  });
+
+  btnSearch.addEventListener("click", loadUsers);
+  btnReload.addEventListener("click", loadUsers);
+  btnCreate.addEventListener("click", createUser);
+
+  // Enter rápido para crear usuario
+  newPassword.addEventListener("keydown", (e) => {
+    if (e.key === "Enter"){
+      e.preventDefault();
+      createUser();
+    }
+  });
+
+  // init
+  loadUsers();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

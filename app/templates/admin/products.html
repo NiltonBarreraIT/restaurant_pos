@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Backoffice | Productos</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .td-actions { white-space: nowrap; }
+    .price-input { max-width: 140px; }
+    .sku-input { max-width: 140px; }
+    .cat-input { max-width: 200px; }
+  </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/admin">🧾 Backoffice</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navAdmin">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navAdmin">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/admin">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/settings">Configuración</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/cash">Caja</a></li>
+        <li class="nav-item"><a class="nav-link active" href="/admin/products/ui">Productos</a></li>
+        <li class="nav-item"><a class="nav-link" href="/pos">POS</a></li>
+        <li class="nav-item"><a class="nav-link" href="/cocina">Cocina</a></li>
+      </ul>
+
+      <span class="navbar-text text-light small">
+        {{ business_name }}
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4">
+
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h3 class="fw-bold mb-0">Productos</h3>
+      <div class="text-muted">Crear, editar precio, categoría y activar/desactivar.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary" id="btnReload">Actualizar</button>
+      <a class="btn btn-secondary" href="/admin">Volver</a>
+    </div>
+  </div>
+
+  <div id="alertBox"></div>
+
+  <!-- Filtros -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Buscar</label>
+          <input class="form-control" id="q" placeholder="Nombre o SKU...">
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label">Categoría</label>
+          <select class="form-select" id="category">
+            <option value="">Todas</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-md-3">
+          <label class="form-label">Activo</label>
+          <select class="form-select" id="active">
+            <option value="">Todos</option>
+            <option value="1">Activos</option>
+            <option value="0">Inactivos</option>
+          </select>
+        </div>
+
+        <div class="col-12 col-md-2 d-grid">
+          <button class="btn btn-primary" id="btnSearch">Filtrar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Crear producto -->
+  <div class="card shadow-sm mb-3">
+    <div class="card-body">
+      <div class="fw-bold mb-2">➕ Crear producto</div>
+      <div class="row g-2">
+        <div class="col-12 col-md-2">
+          <input class="form-control mono" id="newSku" placeholder="SKU">
+        </div>
+        <div class="col-12 col-md-4">
+          <input class="form-control" id="newName" placeholder="Nombre *">
+        </div>
+        <div class="col-12 col-md-3">
+          <input class="form-control" id="newCategory" placeholder="Categoría">
+        </div>
+        <div class="col-12 col-md-2">
+          <input class="form-control mono" id="newPrice" placeholder="Precio" inputmode="numeric">
+        </div>
+        <div class="col-12 col-md-1 d-grid">
+          <button class="btn btn-success" id="btnCreate">Crear</button>
+        </div>
+      </div>
+      <div class="text-muted small mt-2">* nombre obligatorio. Precio por defecto 0 si lo dejas vacío.</div>
+    </div>
+  </div>
+
+  <!-- Tabla -->
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>SKU</th>
+              <th>Nombre</th>
+              <th>Categoría</th>
+              <th class="text-end">Precio</th>
+              <th>Estado</th>
+              <th class="td-actions text-end">Acciones</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const alertBox = $("alertBox");
+  const tbody = $("tbody");
+
+  const q = $("q");
+  const category = $("category");
+  const active = $("active");
+  const btnSearch = $("btnSearch");
+  const btnReload = $("btnReload");
+
+  const newSku = $("newSku");
+  const newName = $("newName");
+  const newCategory = $("newCategory");
+  const newPrice = $("newPrice");
+  const btnCreate = $("btnCreate");
+
+  function showAlert(type, msg){
+    alertBox.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    setTimeout(() => { alertBox.innerHTML = ""; }, 3500);
+  }
+
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+  }
+
+  // ============================
+  // EXTRA PRO: parse CL + format
+  // ============================
+  function parseCLNumber(raw){
+    // Devuelve number (JS) o null si inválido
+    if (raw === null || raw === undefined) return 0;
+    let s = String(raw).trim();
+    if (!s) return 0;
+
+    s = s.replace(/\s+/g, "");
+
+    // Si trae $ lo sacamos
+    s = s.replace(/\$/g, "");
+
+    // Caso: 1.800,50  => miles "." y decimal ","
+    if (s.includes(".") && s.includes(",")) {
+      s = s.replace(/\./g, "");
+      s = s.replace(",", ".");
+    }
+    // Caso: 1.800  => miles "."
+    else if (s.includes(".") && !s.includes(",")) {
+      // Si hay más de un punto => miles seguro
+      if ((s.match(/\./g) || []).length > 1) {
+        s = s.replace(/\./g, "");
+      } else {
+        // un punto: podría ser decimal "10.5" o miles "1.800"
+        // Heurística: si hay 3 dígitos después del punto => miles
+        const parts = s.split(".");
+        if (parts[1] && parts[1].length === 3) s = parts[0] + parts[1];
+      }
+    }
+    // Caso: 1800,50 => decimal ","
+    else if (s.includes(",") && !s.includes(".")) {
+      s = s.replace(",", ".");
+    }
+
+    const n = Number(s);
+    if (!Number.isFinite(n)) return null;
+    return n;
+  }
+
+  function formatCLP(n){
+    try { return "$" + Number(n || 0).toLocaleString("es-CL"); }
+    catch { return "$" + (n || 0); }
+  }
+
+  function formatCLInput(el){
+    // Formatea input de precio con miles (sin $ en el input)
+    const n = parseCLNumber(el.value);
+    if (n === null) return; // no toques si está inválido
+    // Entero: formato con miles
+    const intVal = Math.round(n);
+    el.value = String(intVal.toLocaleString("es-CL")); // ejemplo: 1.800
+  }
+
+  function normalizeForSend(raw){
+    // Normaliza a string numérico simple para backend (ej: "1800")
+    const n = parseCLNumber(raw);
+    if (n === null) return null;
+    // aquí usamos entero, si quieres decimales lo cambiamos
+    return String(Math.round(n));
+  }
+
+  async function loadCategories(){
+    const r = await fetch("/admin/products/categories");
+    const j = await r.json();
+    if (!j.ok) return;
+
+    const prev = category.value;
+
+    category.innerHTML = `<option value="">Todas</option>` +
+      (j.items || []).map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+
+    category.value = prev;
+  }
+
+  async function loadProducts(){
+    const params = new URLSearchParams();
+    if (q.value.trim()) params.set("q", q.value.trim());
+    if (category.value) params.set("category", category.value);
+    if (active.value) params.set("active", active.value);
+
+    const r = await fetch("/admin/products?" + params.toString());
+    const j = await r.json();
+
+    if (!j.ok){
+      showAlert("danger", j.error || "No se pudo cargar productos");
+      return;
+    }
+
+    const items = j.items || [];
+    tbody.innerHTML = items.map(renderRow).join("");
+
+    // EXTRA PRO: engancha blur/enter para formatear precios
+    hookPriceFormatters();
+  }
+
+  function renderRow(p){
+    const statusBadge = p.active
+      ? `<span class="badge bg-success">Activo</span>`
+      : `<span class="badge bg-secondary">Inactivo</span>`;
+
+    const priceVal = Number(p.price || 0);
+    const priceInputVal = Number.isFinite(priceVal) ? Math.round(priceVal).toLocaleString("es-CL") : "0";
+
+    return `
+      <tr data-id="${p.id}">
+        <td class="mono">${p.id}</td>
+        <td><input class="form-control form-control-sm mono sku-input" value="${escapeHtml(p.sku || "")}" data-field="sku"></td>
+        <td><input class="form-control form-control-sm" value="${escapeHtml(p.name || "")}" data-field="name"></td>
+        <td><input class="form-control form-control-sm cat-input" value="${escapeHtml(p.category || "")}" data-field="category"></td>
+        <td class="text-end">
+          <input class="form-control form-control-sm mono price-input text-end"
+                 value="${priceInputVal}"
+                 data-field="price"
+                 inputmode="numeric"
+                 data-role="price">
+          <div class="text-muted small" data-role="price-preview">${formatCLP(priceVal)}</div>
+        </td>
+        <td>${statusBadge}</td>
+        <td class="td-actions text-end">
+          <button class="btn btn-sm btn-primary" onclick="saveRow(${p.id})">Guardar</button>
+          <button class="btn btn-sm ${p.active ? "btn-outline-secondary" : "btn-outline-success"}" onclick="toggleActive(${p.id}, ${p.active ? "false" : "true"})">
+            ${p.active ? "Desactivar" : "Activar"}
+          </button>
+        </td>
+      </tr>
+    `;
+  }
+
+  function hookPriceFormatters(){
+    const inputs = tbody.querySelectorAll('input[data-role="price"]');
+    inputs.forEach(inp => {
+      // Evita duplicar listeners
+      if (inp.dataset.bound === "1") return;
+      inp.dataset.bound = "1";
+
+      // Al salir del campo: formatea 1800 => 1.800
+      inp.addEventListener("blur", (e) => {
+        formatCLInput(inp);
+        updatePricePreview(inp);
+      });
+
+      // Enter también formatea y (opcional) guarda
+      inp.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          formatCLInput(inp);
+          updatePricePreview(inp);
+
+          // Guardado rápido con Enter (opcional):
+          const tr = inp.closest("tr");
+          const id = tr?.dataset?.id;
+          if (id) saveRow(Number(id));
+        }
+      });
+
+      // Mientras escribe, actualiza preview suave
+      inp.addEventListener("input", () => updatePricePreview(inp));
+    });
+  }
+
+  function updatePricePreview(inp){
+    const tr = inp.closest("tr");
+    const preview = tr?.querySelector('[data-role="price-preview"]');
+    if (!preview) return;
+    const n = parseCLNumber(inp.value);
+    preview.textContent = (n === null) ? "Precio inválido" : formatCLP(n);
+  }
+
+  function getRowData(id){
+    const tr = tbody.querySelector(`tr[data-id="${id}"]`);
+    const inputs = tr.querySelectorAll("input[data-field]");
+    const data = {};
+    inputs.forEach(inp => data[inp.dataset.field] = inp.value);
+    return data;
+  }
+
+  async function saveRow(id){
+    const data = getRowData(id);
+
+    const payload = {
+      sku: (data.sku || "").trim() || null,
+      name: (data.name || "").trim(),
+      category: (data.category || "").trim() || null,
+      price: normalizeForSend(data.price) // ✅ ENVÍO LIMPIO
+    };
+
+    if (!payload.name){
+      showAlert("warning", "El nombre no puede ir vacío");
+      return;
+    }
+    if (payload.price === null){
+      showAlert("danger", "price inválido");
+      return;
+    }
+
+    const r = await fetch(`/admin/products/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo guardar");
+      return;
+    }
+
+    showAlert("success", "✅ Guardado");
+    await loadCategories();
+    await loadProducts();
+  }
+
+  async function toggleActive(id, value){
+    const r = await fetch(`/admin/products/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: !!value })
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo cambiar estado");
+      return;
+    }
+
+    showAlert("success", value ? "✅ Activado" : "✅ Desactivado");
+    await loadProducts();
+  }
+
+  async function createProduct(){
+    const payload = {
+      sku: (newSku.value || "").trim() || null,
+      name: (newName.value || "").trim(),
+      category: (newCategory.value || "").trim() || null,
+      price: normalizeForSend(newPrice.value || "0")
+    };
+
+    if (!payload.name){
+      showAlert("warning", "El nombre es obligatorio");
+      return;
+    }
+    if (payload.price === null){
+      showAlert("danger", "price inválido");
+      return;
+    }
+
+    const r = await fetch("/admin/products", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo crear");
+      return;
+    }
+
+    showAlert("success", "✅ Producto creado");
+    newSku.value = "";
+    newName.value = "";
+    newCategory.value = "";
+    newPrice.value = "";
+
+    await loadCategories();
+    await loadProducts();
+  }
+
+  // EXTRA PRO: formatear precio al salir del input de creación
+  newPrice.addEventListener("blur", () => formatCLInput(newPrice));
+  newPrice.addEventListener("input", () => { /* opcional preview */ });
+  newPrice.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      formatCLInput(newPrice);
+      createProduct();
+    }
+  });
+
+  btnSearch.addEventListener("click", () => loadProducts());
+  btnReload.addEventListener("click", async () => {
+    await loadCategories();
+    await loadProducts();
+  });
+
+  btnCreate.addEventListener("click", createProduct);
+
+  // init
+  loadCategories().then(loadProducts);
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

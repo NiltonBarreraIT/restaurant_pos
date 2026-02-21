@@ -33,6 +33,7 @@ def create_app():
     from .pos.routes import pos_bp
     from .admin.routes import admin_bp
     from .cocina.routes import cocina_bp
+    
 
     app.register_blueprint(auth_bp, url_prefix="/auth")
     app.register_blueprint(pos_bp, url_prefix="/pos")

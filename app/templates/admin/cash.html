@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Backoffice | Caja</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/admin">🧾 Backoffice</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navAdmin">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <div class="collapse navbar-collapse" id="navAdmin">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/admin">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/settings">Configuración</a></li>
+        <li class="nav-item"><a class="nav-link active" href="/admin/cash">Caja</a></li>
+        <li class="nav-item"><a class="nav-link" href="/pos">POS</a></li>
+        <li class="nav-item"><a class="nav-link" href="/cocina">Cocina</a></li>
+      </ul>
+
+      <span class="navbar-text text-light small">
+        {{ business_name }}
+      </span>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h3 class="fw-bold mb-0">Caja (PRO)</h3>
+      <div class="text-muted">Abrir/cerrar y ver resumen real por método de pago.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-secondary" id="btnRefresh">Actualizar</button>
+      <a class="btn btn-secondary" href="/admin">Volver</a>
+    </div>
+  </div>
+
+  <div id="alertBox"></div>
+
+  <div class="row g-3">
+    <div class="col-12 col-lg-5">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="fw-bold">Estado</div>
+            <span class="badge" id="badgeStatus">...</span>
+          </div>
+
+          <div class="mt-3 small">
+            <div><strong>ID Caja:</strong> <span class="mono" id="crId">-</span></div>
+            <div><strong>Abierta:</strong> <span class="mono" id="crOpenedAt">-</span></div>
+            <div><strong>Cerrada:</strong> <span class="mono" id="crClosedAt">-</span></div>
+            <div><strong>Monto apertura:</strong> <span class="mono" id="crOpeningAmount">-</span></div>
+          </div>
+
+          <hr>
+
+          <!-- Abrir -->
+          <div id="openBox">
+            <h6 class="fw-bold mb-2">Abrir caja</h6>
+            <div class="input-group mb-2">
+              <span class="input-group-text">$</span>
+              <input class="form-control" id="openingAmount" inputmode="numeric" placeholder="0">
+            </div>
+            <div class="mb-2">
+              <textarea class="form-control" id="openingNotes" rows="2" placeholder="Notas (opcional)"></textarea>
+            </div>
+            <button class="btn btn-success w-100" id="btnOpen">Abrir caja</button>
+          </div>
+
+          <!-- Cerrar -->
+          <div id="closeBox" style="display:none;">
+            <h6 class="fw-bold mb-2">Cerrar caja</h6>
+            <div class="input-group mb-2">
+              <span class="input-group-text">$</span>
+              <input class="form-control" id="closingAmount" inputmode="numeric" placeholder="Monto de cierre (conteo físico)">
+            </div>
+            <button class="btn btn-danger w-100" id="btnClose">Cerrar caja</button>
+            <div class="text-muted small mt-2">
+              Al cerrar, tus pedidos pendientes pasan a <span class="mono">closed</span> (según tu lógica actual).
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <div class="col-12 col-lg-7">
+      <div class="card shadow-sm">
+        <div class="card-body">
+          <div class="fw-bold mb-2">Resumen en vivo (caja abierta)</div>
+
+          <div class="row g-3">
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Ventas</div>
+                <div class="fw-bold mono" id="sumSales">$0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Efectivo</div>
+                <div class="fw-bold mono" id="sumCash">$0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Transferencia</div>
+                <div class="fw-bold mono" id="sumTransfer">$0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Pedidos</div>
+                <div class="fw-bold mono" id="sumOrders">0</div>
+              </div>
+            </div>
+
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Cancelados</div>
+                <div class="fw-bold mono" id="sumCancelled">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Pendientes</div>
+                <div class="fw-bold mono" id="sumPending">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Entregados</div>
+                <div class="fw-bold mono" id="sumDelivered">0</div>
+              </div>
+            </div>
+            <div class="col-6 col-md-3">
+              <div class="p-3 border rounded bg-white">
+                <div class="text-muted small">Cerrados</div>
+                <div class="fw-bold mono" id="sumClosed">0</div>
+              </div>
+            </div>
+          </div>
+
+          <hr>
+
+          <div class="text-muted small">
+            Fuente: <span class="mono">GET /pos/cash/summary</span> (totales reales por payments).
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  const alertBox = $("alertBox");
+  const badgeStatus = $("badgeStatus");
+  const crId = $("crId");
+  const crOpenedAt = $("crOpenedAt");
+  const crClosedAt = $("crClosedAt");
+  const crOpeningAmount = $("crOpeningAmount");
+
+  const openBox = $("openBox");
+  const closeBox = $("closeBox");
+
+  const openingAmount = $("openingAmount");
+  const openingNotes = $("openingNotes");
+  const btnOpen = $("btnOpen");
+
+  const closingAmount = $("closingAmount");
+  const btnClose = $("btnClose");
+
+  const btnRefresh = $("btnRefresh");
+
+  const sumSales = $("sumSales");
+  const sumCash = $("sumCash");
+  const sumTransfer = $("sumTransfer");
+  const sumOrders = $("sumOrders");
+  const sumCancelled = $("sumCancelled");
+  const sumPending = $("sumPending");
+  const sumDelivered = $("sumDelivered");
+  const sumClosed = $("sumClosed");
+
+  function money(n){
+    try { return "$" + Number(n || 0).toLocaleString("es-CL"); }
+    catch { return "$" + (n || 0); }
+  }
+
+  function showAlert(type, msg){
+    alertBox.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    setTimeout(() => { alertBox.innerHTML = ""; }, 3500);
+  }
+
+  function resetSummary(){
+    sumSales.textContent = money(0);
+    sumCash.textContent = money(0);
+    sumTransfer.textContent = money(0);
+    sumOrders.textContent = "0";
+    sumCancelled.textContent = "0";
+    sumPending.textContent = "0";
+    sumDelivered.textContent = "0";
+    sumClosed.textContent = "0";
+  }
+
+  async function loadCashStatus(){
+    const r = await fetch("/pos/cash/status");
+    const j = await r.json();
+
+    if (!j.ok) {
+      showAlert("danger", j.error || "No se pudo leer estado de caja");
+      return;
+    }
+
+    const open = !!j.open;
+    const cr = j.cash_register;
+
+    if (!cr) {
+      badgeStatus.className = "badge bg-secondary";
+      badgeStatus.textContent = "SIN CAJA";
+      crId.textContent = "-";
+      crOpenedAt.textContent = "-";
+      crClosedAt.textContent = "-";
+      crOpeningAmount.textContent = "-";
+      openBox.style.display = "";
+      closeBox.style.display = "none";
+      resetSummary();
+      return;
+    }
+
+    crId.textContent = cr.id ?? "-";
+    crOpenedAt.textContent = cr.opened_at ?? "-";
+    crClosedAt.textContent = cr.closed_at ?? "-";
+    crOpeningAmount.textContent = money(cr.opening_amount);
+
+    if (open){
+      badgeStatus.className = "badge bg-success";
+      badgeStatus.textContent = "ABIERTA";
+      openBox.style.display = "none";
+      closeBox.style.display = "";
+      await loadSummary();
+    } else {
+      badgeStatus.className = "badge bg-danger";
+      badgeStatus.textContent = "CERRADA";
+      openBox.style.display = "";
+      closeBox.style.display = "none";
+      resetSummary();
+    }
+  }
+
+  async function loadSummary(){
+    const r = await fetch("/pos/cash/summary");
+    const j = await r.json();
+
+    if (!j.ok){
+      showAlert("danger", j.error || "No se pudo leer resumen");
+      return;
+    }
+
+    if (!j.open || !j.summary){
+      resetSummary();
+      return;
+    }
+
+    const s = j.summary;
+
+    sumSales.textContent = money(s.total_sales);
+    sumCash.textContent = money(s.total_cash);
+    sumTransfer.textContent = money(s.total_transfer);
+    sumOrders.textContent = String(s.total_orders ?? 0);
+    sumCancelled.textContent = String(s.cancelled ?? 0);
+    sumPending.textContent = String(s.pending ?? 0);
+    sumDelivered.textContent = String(s.delivered ?? 0);
+    sumClosed.textContent = String(s.closed ?? 0);
+  }
+
+  btnRefresh.addEventListener("click", () => loadCashStatus());
+
+  btnOpen.addEventListener("click", async () => {
+    const amt = (openingAmount.value || "0").trim();
+    const notes = (openingNotes.value || "").trim();
+
+    const r = await fetch("/pos/cash/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ opening_amount: amt, notes })
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo abrir caja");
+      return;
+    }
+    showAlert("success", "✅ Caja abierta");
+    openingAmount.value = "";
+    openingNotes.value = "";
+    await loadCashStatus();
+  });
+
+  btnClose.addEventListener("click", async () => {
+    const amt = (closingAmount.value || "0").trim();
+    if (!amt){
+      showAlert("warning", "Ingresa el monto de cierre");
+      return;
+    }
+
+    if (!confirm("¿Cerrar caja ahora?")){
+      return;
+    }
+
+    const r = await fetch("/pos/cash/close", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ closing_amount: amt })
+    });
+    const j = await r.json();
+
+    if (!r.ok || !j.ok){
+      showAlert("danger", j.error || "No se pudo cerrar caja");
+      return;
+    }
+    showAlert("success", "✅ Caja cerrada");
+    closingAmount.value = "";
+    await loadCashStatus();
+  });
+
+  // init
+  loadCashStatus();
+
+  // auto-refresh suave cada 15s si está abierta
+  setInterval(async () => {
+    try {
+      await loadCashStatus();
+    } catch (e) {}
+  }, 15000);
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

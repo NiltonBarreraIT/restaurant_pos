@@ -1,7 +1,7 @@
 from decimal import Decimal
 from datetime import datetime
 
-from flask import request, jsonify, render_template
+from flask import request, jsonify, render_template, redirect, url_for
 from flask_login import login_required, current_user
 
 from sqlalchemy import func
@@ -11,6 +11,24 @@ from app.extensions import db
 from app.models import Order
 from app.utils import require_roles
 from . import pos_bp
+
+
+# ======================================================
+# SETTINGS (para receipt / branding)
+# ======================================================
+def get_setting(key: str, default: str = "") -> str:
+    from app.models import AppSetting  # import local para evitar ciclos
+    s = AppSetting.query.get(key)
+    return (s.value if s and s.value is not None else default)
+
+
+# ======================================================
+# POS ROOT: /pos -> /pos/ui (evita 404)
+# ======================================================
+@pos_bp.get("/")
+@login_required
+def pos_root():
+    return redirect(url_for("pos.pos_ui"))
 
 
 # ======================================================
@@ -100,19 +118,16 @@ def cash_close():
     orders_q = Order.query.filter_by(cash_register_id=cr.id)
 
     # ✅ CERRAR pedidos pendientes de ESTA caja al cerrar caja
-    # (prep/ready -> closed)
     pendientes = orders_q.filter(Order.status.in_([
         OrderStatus.PREP.value,
         OrderStatus.READY.value
     ]))
 
-    # Update masivo
     pendientes.update(
         {Order.status: OrderStatus.CLOSED.value},
         synchronize_session=False
     )
 
-    # Para resumen de caja: consideramos ventas todas menos canceladas
     orders_ok = orders_q.filter(Order.status != OrderStatus.CANCELLED.value).all()
     orders_cancelled = orders_q.filter(Order.status == OrderStatus.CANCELLED.value).count()
 
@@ -198,10 +213,6 @@ def create_order():
     if not cr:
         return jsonify({"ok": False, "error": "Caja cerrada"}), 400
 
-    # ------------------------------------------------------
-    # ✅ ASIGNAR CORRELATIVO POR CAJA (number_in_register)
-    # Maneja posible colisión del UNIQUE con reintento.
-    # ------------------------------------------------------
     tries = 0
     while True:
         tries += 1
@@ -263,17 +274,12 @@ def create_order():
             db.session.rollback()
             if tries >= 2:
                 return jsonify({"ok": False, "error": "No se pudo asignar correlativo, reintenta"}), 409
-            # reintenta calculando el next_num nuevamente
+            # reintenta
 
 
 @pos_bp.get("/orders/history")
 @login_required
 def orders_history():
-    """
-    Por defecto muestra SOLO pedidos de la caja abierta (si existe),
-    para que al abrir nueva caja el historial quede "en blanco".
-    Si quieres ver todo, usa ?all=1
-    """
     limit = int(request.args.get("limit", 50))
     show_all = (request.args.get("all") or "").strip() == "1"
 
@@ -343,7 +349,6 @@ def cancel_order(order_id):
 
     order = Order.query.get_or_404(order_id)
 
-    # Solo permitir anular pedidos de la caja actualmente abierta
     if order.cash_register_id != cr.id:
         return jsonify({"ok": False, "error": "Solo puedes anular pedidos de la caja abierta"}), 400
 
@@ -351,7 +356,6 @@ def cancel_order(order_id):
     if st == OrderStatus.CANCELLED.value:
         return jsonify({"ok": True, "status": order.status, "message": "Ya estaba anulado"})
 
-    # Bloquear anulación cuando ya fue entregado/cerrado:
     if st in (OrderStatus.DELIVERED.value, OrderStatus.CLOSED.value):
         return jsonify({"ok": False, "error": "No puedes anular un pedido entregado/cerrado"}), 400
 
@@ -368,12 +372,41 @@ def cancel_order(order_id):
     return jsonify({"ok": True, "status": order.status})
 
 
+# ======================================================
+# RECEIPT
+# ======================================================
 @pos_bp.get("/receipt/<int:order_id>")
 @login_required
 def receipt(order_id):
     order = Order.query.get_or_404(order_id)
     total = order.total_amount()
-    return render_template("receipt.html", order=order, total=total)
+
+    # settings para receipt PRO
+    business_name = get_setting("business_name", "POS Barra")
+    receipt_footer = get_setting("receipt_footer", "Gracias por su compra")
+    receipt_autoprint = get_setting("receipt_autoprint", "1")
+    qr_size = get_setting("qr_size", "120")
+
+    # normaliza qr_size
+    try:
+        n = int(qr_size)
+        if n < 80:
+            n = 80
+        if n > 400:
+            n = 400
+        qr_size = str(n)
+    except Exception:
+        qr_size = "120"
+
+    return render_template(
+        "receipt.html",
+        order=order,
+        total=total,
+        business_name=business_name,
+        receipt_footer=receipt_footer,
+        receipt_autoprint=receipt_autoprint,
+        qr_size=qr_size
+    )
 
 
 @pos_bp.get("/q/order/<int:order_id>")
@@ -381,7 +414,63 @@ def qr_order_status(order_id):
     order = Order.query.get_or_404(order_id)
     return render_template("qr_status.html", order=order)
 
+@pos_bp.get("/cash/summary")
+@login_required
+@require_roles("admin", "cashier")
+def cash_summary():
+    """
+    Resumen en vivo de la caja ABIERTA.
+    - Totales por método de pago (cash / transfer)
+    - Ventas totales (solo no canceladas)
+    - Cantidad de pedidos: total, cancelados, pendientes (prep/ready), entregados, cerrados
+    """
+    from app.models import OrderStatus, PaymentMethod
 
+    cr = get_open_cash_register()
+    if not cr:
+        return jsonify({"ok": True, "open": False, "summary": None})
+
+    # pedidos de la caja
+    q = Order.query.filter_by(cash_register_id=cr.id)
+
+    # Conteos por estado
+    total_orders = q.count()
+    cancelled = q.filter(Order.status == OrderStatus.CANCELLED.value).count()
+    pending = q.filter(Order.status.in_([OrderStatus.PREP.value, OrderStatus.READY.value])).count()
+    delivered = q.filter(Order.status == OrderStatus.DELIVERED.value).count()
+    closed = q.filter(Order.status == OrderStatus.CLOSED.value).count()
+
+    # Totales por pagos (solo pedidos NO cancelados)
+    orders_ok = q.filter(Order.status != OrderStatus.CANCELLED.value).all()
+
+    total_cash = Decimal("0")
+    total_transfer = Decimal("0")
+    total_sales = Decimal("0")
+
+    for o in orders_ok:
+        for pay in (o.payments or []):
+            amt = Decimal(str(pay.amount or 0))
+            if pay.method == PaymentMethod.CASH.value:
+                total_cash += amt
+            elif pay.method == PaymentMethod.TRANSFER.value:
+                total_transfer += amt
+            total_sales += amt
+
+    return jsonify({
+        "ok": True,
+        "open": True,
+        "cash_register_id": cr.id,
+        "summary": {
+            "total_sales": float(total_sales),
+            "total_cash": float(total_cash),
+            "total_transfer": float(total_transfer),
+            "total_orders": int(total_orders),
+            "cancelled": int(cancelled),
+            "pending": int(pending),
+            "delivered": int(delivered),
+            "closed": int(closed),
+        }
+    })
 # ======================================================
 # UI
 # ======================================================
