@@ -11,6 +11,10 @@
     .price-input { max-width: 140px; }
     .sku-input { max-width: 140px; }
     .cat-input { max-width: 200px; }
+    .unit-input { max-width: 90px; }
+    .type-input { max-width: 140px; }
+    .pos-col { min-width: 150px; }
+    .small-muted { color:#6c757d; font-size: .85rem; }
   </style>
 </head>
 <body class="bg-light">
@@ -28,6 +32,7 @@
         <li class="nav-item"><a class="nav-link" href="/admin/settings">Configuración</a></li>
         <li class="nav-item"><a class="nav-link" href="/admin/cash">Caja</a></li>
         <li class="nav-item"><a class="nav-link active" href="/admin/products/ui">Productos</a></li>
+        <li class="nav-item"><a class="nav-link" href="/admin/purchases/ui">Compras</a></li>
         <li class="nav-item"><a class="nav-link" href="/pos">POS</a></li>
         <li class="nav-item"><a class="nav-link" href="/cocina">Cocina</a></li>
       </ul>
@@ -44,7 +49,10 @@
   <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
     <div>
       <h3 class="fw-bold mb-0">Productos</h3>
-      <div class="text-muted">Crear, editar precio, categoría y activar/desactivar.</div>
+      <div class="text-muted">
+        Crear, editar precio, categoría y activar/desactivar.
+        <span class="small-muted">Tip: para insumos (Harina/Aceite), desmarca “Mostrar en POS”.</span>
+      </div>
     </div>
     <div class="d-flex gap-2">
       <button class="btn btn-outline-secondary" id="btnReload">Actualizar</button>
@@ -70,12 +78,21 @@
           </select>
         </div>
 
-        <div class="col-12 col-md-3">
+        <div class="col-6 col-md-2">
           <label class="form-label">Activo</label>
           <select class="form-select" id="active">
             <option value="">Todos</option>
             <option value="1">Activos</option>
             <option value="0">Inactivos</option>
+          </select>
+        </div>
+
+        <div class="col-6 col-md-3">
+          <label class="form-label">Mostrar en POS</label>
+          <select class="form-select" id="showInPosFilter">
+            <option value="">Todos</option>
+            <option value="1">Sí (Ventas)</option>
+            <option value="0">No (Insumos)</option>
           </select>
         </div>
 
@@ -90,24 +107,50 @@
   <div class="card shadow-sm mb-3">
     <div class="card-body">
       <div class="fw-bold mb-2">➕ Crear producto</div>
+
       <div class="row g-2">
         <div class="col-12 col-md-2">
           <input class="form-control mono" id="newSku" placeholder="SKU">
         </div>
-        <div class="col-12 col-md-4">
+
+        <div class="col-12 col-md-3">
           <input class="form-control" id="newName" placeholder="Nombre *">
         </div>
-        <div class="col-12 col-md-3">
+
+        <div class="col-12 col-md-2">
           <input class="form-control" id="newCategory" placeholder="Categoría">
         </div>
-        <div class="col-12 col-md-2">
-          <input class="form-control mono" id="newPrice" placeholder="Precio" inputmode="numeric">
+
+        <div class="col-6 col-md-2">
+          <select class="form-select" id="newType" title="Tipo">
+            <option value="sale" selected>Venta</option>
+            <option value="supply">Insumo</option>
+          </select>
         </div>
+
+        <div class="col-6 col-md-1">
+          <input class="form-control unit-input mono" id="newUnit" placeholder="UN" title="Unidad (UN/KG/LT)">
+        </div>
+
+        <div class="col-6 col-md-1">
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input" type="checkbox" id="newShowInPos" checked>
+            <label class="form-check-label" for="newShowInPos">POS</label>
+          </div>
+        </div>
+
+        <div class="col-6 col-md-1">
+          <input class="form-control mono text-end" id="newPrice" placeholder="Precio" inputmode="numeric" title="Precio venta (solo si es Venta)">
+        </div>
+
         <div class="col-12 col-md-1 d-grid">
           <button class="btn btn-success" id="btnCreate">Crear</button>
         </div>
       </div>
-      <div class="text-muted small mt-2">* nombre obligatorio. Precio por defecto 0 si lo dejas vacío.</div>
+
+      <div class="text-muted small mt-2">
+        * nombre obligatorio. Si es <strong>Insumo</strong>, normalmente el precio de venta es 0 y “Mostrar en POS” va desmarcado.
+      </div>
     </div>
   </div>
 
@@ -122,13 +165,20 @@
               <th>SKU</th>
               <th>Nombre</th>
               <th>Categoría</th>
+              <th>Tipo</th>
+              <th>Unidad</th>
               <th class="text-end">Precio</th>
+              <th class="pos-col">Mostrar en POS</th>
               <th>Estado</th>
               <th class="td-actions text-end">Acciones</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
         </table>
+      </div>
+
+      <div class="small-muted mt-2">
+        ✅ Para “Harina”, crea como <strong>Insumo</strong> y desmarca “Mostrar en POS”. Así aparecerá en Compras pero no en POS.
       </div>
     </div>
   </div>
@@ -144,6 +194,7 @@
   const q = $("q");
   const category = $("category");
   const active = $("active");
+  const showInPosFilter = $("showInPosFilter");
   const btnSearch = $("btnSearch");
   const btnReload = $("btnReload");
 
@@ -151,6 +202,9 @@
   const newName = $("newName");
   const newCategory = $("newCategory");
   const newPrice = $("newPrice");
+  const newType = $("newType");
+  const newUnit = $("newUnit");
+  const newShowInPos = $("newShowInPos");
   const btnCreate = $("btnCreate");
 
   function showAlert(type, msg){
@@ -165,38 +219,27 @@
   }
 
   // ============================
-  // EXTRA PRO: parse CL + format
+  // parse CL + format
   // ============================
   function parseCLNumber(raw){
-    // Devuelve number (JS) o null si inválido
     if (raw === null || raw === undefined) return 0;
     let s = String(raw).trim();
     if (!s) return 0;
 
     s = s.replace(/\s+/g, "");
-
-    // Si trae $ lo sacamos
     s = s.replace(/\$/g, "");
 
-    // Caso: 1.800,50  => miles "." y decimal ","
     if (s.includes(".") && s.includes(",")) {
       s = s.replace(/\./g, "");
       s = s.replace(",", ".");
-    }
-    // Caso: 1.800  => miles "."
-    else if (s.includes(".") && !s.includes(",")) {
-      // Si hay más de un punto => miles seguro
+    } else if (s.includes(".") && !s.includes(",")) {
       if ((s.match(/\./g) || []).length > 1) {
         s = s.replace(/\./g, "");
       } else {
-        // un punto: podría ser decimal "10.5" o miles "1.800"
-        // Heurística: si hay 3 dígitos después del punto => miles
         const parts = s.split(".");
         if (parts[1] && parts[1].length === 3) s = parts[0] + parts[1];
       }
-    }
-    // Caso: 1800,50 => decimal ","
-    else if (s.includes(",") && !s.includes(".")) {
+    } else if (s.includes(",") && !s.includes(".")) {
       s = s.replace(",", ".");
     }
 
@@ -211,19 +254,15 @@
   }
 
   function formatCLInput(el){
-    // Formatea input de precio con miles (sin $ en el input)
     const n = parseCLNumber(el.value);
-    if (n === null) return; // no toques si está inválido
-    // Entero: formato con miles
+    if (n === null) return;
     const intVal = Math.round(n);
-    el.value = String(intVal.toLocaleString("es-CL")); // ejemplo: 1.800
+    el.value = String(intVal.toLocaleString("es-CL"));
   }
 
   function normalizeForSend(raw){
-    // Normaliza a string numérico simple para backend (ej: "1800")
     const n = parseCLNumber(raw);
     if (n === null) return null;
-    // aquí usamos entero, si quieres decimales lo cambiamos
     return String(Math.round(n));
   }
 
@@ -246,6 +285,9 @@
     if (category.value) params.set("category", category.value);
     if (active.value) params.set("active", active.value);
 
+    // Nota: este filtro es UI (si tu backend aún no filtra show_in_pos, filtramos acá)
+    const showFilter = showInPosFilter.value;
+
     const r = await fetch("/admin/products?" + params.toString());
     const j = await r.json();
 
@@ -254,10 +296,13 @@
       return;
     }
 
-    const items = j.items || [];
+    let items = j.items || [];
+
+    if (showFilter === "1") items = items.filter(x => (x.show_in_pos ?? true) === true);
+    if (showFilter === "0") items = items.filter(x => (x.show_in_pos ?? true) === false);
+
     tbody.innerHTML = items.map(renderRow).join("");
 
-    // EXTRA PRO: engancha blur/enter para formatear precios
     hookPriceFormatters();
   }
 
@@ -269,12 +314,33 @@
     const priceVal = Number(p.price || 0);
     const priceInputVal = Number.isFinite(priceVal) ? Math.round(priceVal).toLocaleString("es-CL") : "0";
 
+    const pType = (p.product_type || "sale");
+    const unit = (p.unit || "UN");
+
+    const showInPos = (p.show_in_pos ?? true) === true;
+
     return `
       <tr data-id="${p.id}">
         <td class="mono">${p.id}</td>
+
         <td><input class="form-control form-control-sm mono sku-input" value="${escapeHtml(p.sku || "")}" data-field="sku"></td>
         <td><input class="form-control form-control-sm" value="${escapeHtml(p.name || "")}" data-field="name"></td>
         <td><input class="form-control form-control-sm cat-input" value="${escapeHtml(p.category || "")}" data-field="category"></td>
+
+        <td>
+          <select class="form-select form-select-sm type-input" data-field="product_type">
+            <option value="sale" ${pType === "sale" ? "selected" : ""}>Venta</option>
+            <option value="supply" ${pType === "supply" ? "selected" : ""}>Insumo</option>
+          </select>
+        </td>
+
+        <td>
+          <input class="form-control form-control-sm mono unit-input"
+                 value="${escapeHtml(unit)}"
+                 data-field="unit"
+                 placeholder="UN">
+        </td>
+
         <td class="text-end">
           <input class="form-control form-control-sm mono price-input text-end"
                  value="${priceInputVal}"
@@ -283,7 +349,17 @@
                  data-role="price">
           <div class="text-muted small" data-role="price-preview">${formatCLP(priceVal)}</div>
         </td>
+
+        <td class="pos-col">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" data-field="show_in_pos" ${showInPos ? "checked" : ""}>
+            <label class="form-check-label">${showInPos ? "Sí" : "No"}</label>
+          </div>
+          <div class="small-muted">Oculta insumos del POS</div>
+        </td>
+
         <td>${statusBadge}</td>
+
         <td class="td-actions text-end">
           <button class="btn btn-sm btn-primary" onclick="saveRow(${p.id})">Guardar</button>
           <button class="btn btn-sm ${p.active ? "btn-outline-secondary" : "btn-outline-success"}" onclick="toggleActive(${p.id}, ${p.active ? "false" : "true"})">
@@ -297,32 +373,38 @@
   function hookPriceFormatters(){
     const inputs = tbody.querySelectorAll('input[data-role="price"]');
     inputs.forEach(inp => {
-      // Evita duplicar listeners
       if (inp.dataset.bound === "1") return;
       inp.dataset.bound = "1";
 
-      // Al salir del campo: formatea 1800 => 1.800
-      inp.addEventListener("blur", (e) => {
+      inp.addEventListener("blur", () => {
         formatCLInput(inp);
         updatePricePreview(inp);
       });
 
-      // Enter también formatea y (opcional) guarda
       inp.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
           e.preventDefault();
           formatCLInput(inp);
           updatePricePreview(inp);
 
-          // Guardado rápido con Enter (opcional):
           const tr = inp.closest("tr");
           const id = tr?.dataset?.id;
           if (id) saveRow(Number(id));
         }
       });
 
-      // Mientras escribe, actualiza preview suave
       inp.addEventListener("input", () => updatePricePreview(inp));
+    });
+
+    // Label del switch show_in_pos
+    const switches = tbody.querySelectorAll('input[type="checkbox"][data-field="show_in_pos"]');
+    switches.forEach(sw => {
+      if (sw.dataset.bound === "1") return;
+      sw.dataset.bound = "1";
+      sw.addEventListener("change", () => {
+        const label = sw.closest("td")?.querySelector(".form-check-label");
+        if (label) label.textContent = sw.checked ? "Sí" : "No";
+      });
     });
   }
 
@@ -336,9 +418,13 @@
 
   function getRowData(id){
     const tr = tbody.querySelector(`tr[data-id="${id}"]`);
-    const inputs = tr.querySelectorAll("input[data-field]");
+    const inputs = tr.querySelectorAll("input[data-field], select[data-field]");
     const data = {};
-    inputs.forEach(inp => data[inp.dataset.field] = inp.value);
+    inputs.forEach(el => {
+      const key = el.dataset.field;
+      if (el.type === "checkbox") data[key] = el.checked;
+      else data[key] = el.value;
+    });
     return data;
   }
 
@@ -349,7 +435,10 @@
       sku: (data.sku || "").trim() || null,
       name: (data.name || "").trim(),
       category: (data.category || "").trim() || null,
-      price: normalizeForSend(data.price) // ✅ ENVÍO LIMPIO
+      price: normalizeForSend(data.price),
+      product_type: (data.product_type || "sale"),
+      unit: (data.unit || "UN").trim() || "UN",
+      show_in_pos: !!data.show_in_pos
     };
 
     if (!payload.name){
@@ -359,6 +448,13 @@
     if (payload.price === null){
       showAlert("danger", "price inválido");
       return;
+    }
+
+    // Si es insumo, por defecto no mostrar en POS y precio 0 (opcional)
+    if (payload.product_type === "supply") {
+      payload.show_in_pos = false;
+      // Si quieres forzar precio 0 para insumo, descomenta:
+      // payload.price = "0";
     }
 
     const r = await fetch(`/admin/products/${id}`, {
@@ -400,7 +496,10 @@
       sku: (newSku.value || "").trim() || null,
       name: (newName.value || "").trim(),
       category: (newCategory.value || "").trim() || null,
-      price: normalizeForSend(newPrice.value || "0")
+      price: normalizeForSend(newPrice.value || "0"),
+      product_type: (newType.value || "sale"),
+      unit: (newUnit.value || "UN").trim() || "UN",
+      show_in_pos: !!newShowInPos.checked
     };
 
     if (!payload.name){
@@ -410,6 +509,13 @@
     if (payload.price === null){
       showAlert("danger", "price inválido");
       return;
+    }
+
+    // Si es insumo: por defecto no mostrar en POS
+    if (payload.product_type === "supply") {
+      payload.show_in_pos = false;
+      // (opcional) forzar precio 0:
+      // payload.price = "0";
     }
 
     const r = await fetch("/admin/products", {
@@ -429,20 +535,28 @@
     newName.value = "";
     newCategory.value = "";
     newPrice.value = "";
+    newType.value = "sale";
+    newUnit.value = "UN";
+    newShowInPos.checked = true;
 
     await loadCategories();
     await loadProducts();
   }
 
-  // EXTRA PRO: formatear precio al salir del input de creación
+  // Formatear precio creación
   newPrice.addEventListener("blur", () => formatCLInput(newPrice));
-  newPrice.addEventListener("input", () => { /* opcional preview */ });
   newPrice.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
       formatCLInput(newPrice);
       createProduct();
     }
+  });
+
+  // Auto toggle: si seleccionas "Insumo" al crear, apaga POS
+  newType.addEventListener("change", () => {
+    if (newType.value === "supply") newShowInPos.checked = false;
+    else newShowInPos.checked = true;
   });
 
   btnSearch.addEventListener("click", () => loadProducts());
@@ -453,7 +567,6 @@
 
   btnCreate.addEventListener("click", createProduct);
 
-  // init
   loadCategories().then(loadProducts);
 </script>
 

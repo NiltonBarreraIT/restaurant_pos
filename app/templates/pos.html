@@ -52,10 +52,6 @@
       justify-content: center;
       white-space: nowrap;
     }
-
-    /* fila clickeable en historial (fallback) */
-    .history-row { cursor: pointer; }
-    .history-row:hover { background: rgba(25, 135, 84, .06); }
   </style>
 </head>
 
@@ -96,7 +92,6 @@
 
       <div class="col-md-4">
         <label class="form-label">Forma de pago</label>
-        <!-- IMPORTANTE: valores internos para backend -->
         <select id="paymentMethod" class="form-select form-select-lg">
           <option value="cash">Efectivo</option>
           <option value="transfer">Transferencia</option>
@@ -109,9 +104,8 @@
       </div>
     </div>
 
-    <!-- hint cuando efectivo no alcanza -->
     <div id="payHint" class="alert alert-warning d-none py-2">
-      ⚠️ En efectivo, el monto pagado debe ser mayor o igual al total.
+      ⚠️ El monto pagado debe ser mayor o igual al total.
     </div>
 
     <div class="row">
@@ -166,53 +160,149 @@
 
 <!-- MODAL ABRIR CAJA -->
 <div class="modal fade" id="openCashModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <form class="modal-content" id="openCashForm">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">🔓 Abrir caja</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title">Abrir caja (conteo inicial)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
 
-      <div class="modal-body">
-        <div id="openCashError" class="alert alert-danger d-none"></div>
+      <form id="openCashForm">
+        <div class="modal-body">
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Monto apertura</label>
+              <input type="number" step="1" min="0" class="form-control" id="openingAmount" value="0" required>
+            </div>
+            <div class="col-12 col-md-8">
+              <label class="form-label">Notas</label>
+              <input type="text" class="form-control" id="openingNotes" placeholder="Ej: cambio, observaciones...">
+            </div>
+          </div>
 
-        <label class="form-label">Monto inicial</label>
-        <input id="openingAmount" type="number" class="form-control" value="0" min="0">
+          <div class="alert alert-info py-2">
+            Completa el <strong>conteo inicial</strong> (stock real al abrir).
+          </div>
 
-        <label class="form-label mt-3">Notas (opcional)</label>
-        <textarea id="openingNotes" class="form-control" rows="2" placeholder="Ej: Cambio inicial..."></textarea>
-      </div>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th style="width: 110px;">Unidad</th>
+                  <th style="width: 140px;">Conteo inicial</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in products or [] %}
+                <tr>
+                  <td class="fw-semibold">{{ p.name }}</td>
+                  <td class="text-muted">{{ p.unit or "UN" }}</td>
+                  <td>
+                    <input type="number" min="0" step="1"
+                           class="form-control form-control-sm open-count"
+                           data-product-id="{{ p.id }}"
+                           value="0">
+                  </td>
+                </tr>
+                {% endfor %}
 
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-        <button type="submit" class="btn btn-success">Abrir caja</button>
-      </div>
-    </form>
+                {% if not (products or []) %}
+                <tr>
+                  <td colspan="3" class="text-muted">
+                    No hay productos para conteo. Revisa que <code>pos_ui()</code> esté pasando <code>products</code>.
+                  </td>
+                </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="text-danger small mt-2 d-none" id="openCashError"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-success">
+            <i class="bi bi-unlock"></i> Abrir caja
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
 <!-- MODAL CERRAR CAJA -->
 <div class="modal fade" id="closeCashModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <form class="modal-content" id="closeCashForm">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">🔒 Cerrar caja</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title">Cerrar caja (conteo final)</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
       </div>
 
-      <div class="modal-body">
-        <div id="closeCashError" class="alert alert-danger d-none"></div>
+      <form id="closeCashForm">
+        <div class="modal-body">
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-md-4">
+              <label class="form-label">Monto final en caja</label>
+              <input type="number" step="1" min="0" class="form-control" id="closingAmount" value="0" required>
+            </div>
+            <div class="col-12 col-md-8">
+              <label class="form-label">Notas</label>
+              <input type="text" class="form-control" id="closingNotes" placeholder="Ej: faltantes, ajustes...">
+            </div>
+          </div>
 
-        <label class="form-label">Monto de cierre</label>
-        <input id="closingAmount" type="number" class="form-control" value="0" min="0">
-        <div class="text-muted small mt-2">Ingresa el efectivo contado al cierre.</div>
-      </div>
+          <div class="alert alert-warning py-2">
+            Completa el <strong>conteo final</strong> (stock real al cerrar).
+          </div>
 
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-        <button type="submit" class="btn btn-danger">Cerrar caja</button>
-      </div>
-    </form>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Producto</th>
+                  <th style="width: 110px;">Unidad</th>
+                  <th style="width: 140px;">Conteo final</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for p in products or [] %}
+                <tr>
+                  <td class="fw-semibold">{{ p.name }}</td>
+                  <td class="text-muted">{{ p.unit or "UN" }}</td>
+                  <td>
+                    <input type="number" min="0" step="1"
+                           class="form-control form-control-sm close-count"
+                           data-product-id="{{ p.id }}"
+                           value="0">
+                  </td>
+                </tr>
+                {% endfor %}
+
+                {% if not (products or []) %}
+                <tr>
+                  <td colspan="3" class="text-muted">
+                    No hay productos para conteo. Revisa que <code>pos_ui()</code> esté pasando <code>products</code>.
+                  </td>
+                </tr>
+                {% endif %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="text-danger small mt-2 d-none" id="closeCashError"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="bi bi-lock"></i> Cerrar caja
+          </button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -273,220 +363,7 @@
 </audio>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-
-<!-- ✅ FORZAMOS que el historial lo pinte ESTE HTML (fallback) aunque exista pos.js -->
-<script>
-  window.FORCE_POS_HISTORY_FALLBACK = true;
-</script>
-
 <script src="{{ url_for('static', filename='js/pos.js') }}"></script>
-
-<!-- ======================================================
-     FALLBACK: historial por caja usando number_in_register
-     (ahora se puede forzar con window.FORCE_POS_HISTORY_FALLBACK = true)
-====================================================== -->
-<script>
-(function () {
-  const API_BASE = "/pos";
-  const historialBody = document.getElementById("historialBody");
-  const orderDetailModalEl = document.getElementById("orderDetailModal");
-  const orderDetailModal = orderDetailModalEl ? new bootstrap.Modal(orderDetailModalEl) : null;
-
-  const hasOwnHistory =
-    typeof window.refreshHistory === "function" ||
-    typeof window.loadOrderHistory === "function" ||
-    typeof window.posRefreshHistory === "function" ||
-    typeof window.mostrarDetallePedido === "function";
-
-  // ✅ Solo nos salimos si NO está forzado
-  if (hasOwnHistory && !window.FORCE_POS_HISTORY_FALLBACK) return;
-
-  function fmtCLP(n) {
-    try { return new Intl.NumberFormat("es-CL").format(Number(n || 0)); }
-    catch { return String(n || 0); }
-  }
-
-  function statusBadge(status) {
-    const s = String(status || "").toLowerCase();
-    if (s === "prep")      return { cls: "bg-warning text-dark", txt: "🟡 En preparación" };
-    if (s === "ready")     return { cls: "bg-success",           txt: "✅ Listo" };
-    if (s === "closed")    return { cls: "bg-secondary",         txt: "📦 Entregado" };
-    if (s === "cancelled") return { cls: "bg-danger",            txt: "❌ Anulado" };
-    return { cls: "bg-secondary", txt: status || "—" };
-  }
-
-  async function fetchJSON(url, opts) {
-    const res = await fetch(url, opts);
-    const ct = res.headers.get("content-type") || "";
-    const data = ct.includes("application/json") ? await res.json() : null;
-    if (!res.ok) {
-      const msg = (data && (data.error || data.message)) || ("HTTP " + res.status);
-      throw new Error(msg);
-    }
-    return data;
-  }
-
-  async function marcarEntregado(orderId) {
-    const ok = confirm("¿Confirmas que el cliente retiró el pedido?");
-    if (!ok) return;
-
-    try {
-      await fetchJSON(`/cocina/api/pedidos/${orderId}/estado`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ estado: "ENTREGADO" })
-      });
-      await refreshHistoryFallback();
-    } catch (e) {
-      console.error(e);
-      alert(e.message || "No se pudo marcar como entregado");
-    }
-  }
-
-  document.addEventListener("click", (e) => {
-    const btnPrint = e.target.closest("#btnPrintTicket");
-    if (btnPrint) {
-      const id = btnPrint.dataset.orderId || window.currentDetailOrderId;
-      if (!id) return alert("No se encontró el ID del pedido para imprimir.");
-      window.open(`${API_BASE}/receipt/${id}`, "_blank");
-      return;
-    }
-
-    const btnCancel = e.target.closest("#btnCancelOrder");
-    if (btnCancel) {
-      const id = btnCancel.dataset.orderId || window.currentDetailOrderId;
-      if (!id) return alert("No se encontró el ID del pedido para anular.");
-      alert("⚠️ Falta endpoint /pos/orders/<id>/cancel en tu backend (no existe en pos_routes.py).");
-    }
-  });
-
-  async function refreshHistoryFallback() {
-    try {
-      const rows = await fetchJSON(`${API_BASE}/orders/history?limit=50`);
-      if (!Array.isArray(rows)) return;
-
-      historialBody.innerHTML = "";
-
-      for (const o of rows) {
-        const orderId = o.id;
-        const numberInRegister = o.number_in_register ?? o.order_number ?? o.id;
-
-        const items = Array.isArray(o.items) ? o.items : [];
-        let prod = "—";
-        if (items.length > 0) {
-          prod = items[0].name || "—";
-          if (items.length > 1) prod += ` (+${items.length - 1})`;
-        }
-
-        const st = statusBadge(o.status);
-
-        const isReady = String(o.status || "").toLowerCase() === "ready";
-        const estadoHtml = isReady
-          ? `
-              <div class="d-grid gap-1 justify-content-center">
-                <span class="badge ${st.cls}">${st.txt}</span>
-                <button type="button"
-                        class="btn btn-sm btn-dark"
-                        data-action="entregar"
-                        data-order-id="${orderId}">
-                  <i class="bi bi-bag-check"></i> Entregar
-                </button>
-              </div>
-            `
-          : `<span class="badge ${st.cls}">${st.txt}</span>`;
-
-        const tr = document.createElement("tr");
-        tr.className = "history-row";
-        tr.dataset.orderId = orderId;
-
-        tr.innerHTML = `
-          <td class="fw-semibold">#${numberInRegister}</td>
-          <td>${prod}</td>
-          <td>${o.created_at || ""}</td>
-          <td class="text-center">${estadoHtml}</td>
-        `;
-
-        tr.addEventListener("click", async (ev) => {
-          if (ev.target.closest('button[data-action="entregar"]')) return;
-
-          try {
-            window.currentDetailOrderId = orderId;
-
-            const btnPrint = document.getElementById("btnPrintTicket");
-            if (btnPrint) btnPrint.dataset.orderId = String(orderId);
-
-            const btnCancel = document.getElementById("btnCancelOrder");
-            if (btnCancel) btnCancel.dataset.orderId = String(orderId);
-
-            const detail = await fetchJSON(`${API_BASE}/orders/${orderId}`);
-            const badge = statusBadge(detail.status);
-
-            const detailOrderNumber = document.getElementById("detailOrderNumber");
-            if (detailOrderNumber) {
-              const nin = detail.number_in_register ?? detail.order_number ?? "";
-              detailOrderNumber.textContent = nin ? `#${nin}` : "";
-            }
-
-            const cust = document.getElementById("detailCustomer");
-            if (cust) cust.textContent = detail.reference_name || "";
-
-            const date = document.getElementById("detailDate");
-            if (date) date.textContent = detail.created_at || "";
-
-            const stEl = document.getElementById("detailStatus");
-            if (stEl) {
-              stEl.className = `order-status badge ${badge.cls}`;
-              stEl.textContent = badge.txt;
-            }
-
-            const body = document.getElementById("detailItems");
-            if (body) {
-              body.innerHTML = "";
-              const itemsD = Array.isArray(detail.items) ? detail.items : [];
-              for (const it of itemsD) {
-                const trIt = document.createElement("tr");
-                trIt.innerHTML = `
-                  <td>${it.name || ""}</td>
-                  <td class="text-center">${it.quantity ?? ""}</td>
-                  <td class="text-end">$${fmtCLP(it.unit_price ?? 0)}</td>
-                  <td class="text-end">$${fmtCLP(it.subtotal ?? 0)}</td>
-                `;
-                body.appendChild(trIt);
-              }
-            }
-
-            const tot = document.getElementById("detailTotal");
-            if (tot) tot.textContent = fmtCLP(detail.total ?? 0);
-
-            if (orderDetailModal) orderDetailModal.show();
-          } catch (e) {
-            console.error(e);
-          }
-        });
-
-        historialBody.appendChild(tr);
-      }
-    } catch (e) {
-      historialBody.innerHTML = "";
-    }
-  }
-
-  document.addEventListener("click", (e) => {
-    const btn = e.target.closest('button[data-action="entregar"]');
-    if (!btn) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const id = btn.dataset.orderId;
-    if (!id) return;
-    marcarEntregado(id);
-  });
-
-  document.addEventListener("DOMContentLoaded", () => {
-    refreshHistoryFallback();
-    setInterval(refreshHistoryFallback, 8000);
-  });
-})();
-</script>
 
 </body>
 </html>

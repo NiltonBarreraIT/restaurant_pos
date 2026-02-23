@@ -21,6 +21,10 @@
         <li class="nav-item"><a class="nav-link active" href="/admin">Dashboard</a></li>
         <li class="nav-item"><a class="nav-link" href="/admin/settings">Configuración</a></li>
         <li class="nav-item"><a class="nav-link" href="/admin/cash">Caja</a></li>
+
+        <!-- ✅ NUEVO: COMPRAS -->
+        <li class="nav-item"><a class="nav-link" href="/admin/purchases/ui">Compras</a></li>
+
         <li class="nav-item"><a class="nav-link" href="/pos">POS</a></li>
         <li class="nav-item"><a class="nav-link" href="/cocina">Cocina</a></li>
       </ul>
@@ -74,7 +78,7 @@
       </div>
     </div>
 
-    <!-- CAJA (PUNTO C) -->
+    <!-- CAJA -->
     <div class="col-12 col-md-6 col-xl-4">
       <div class="card shadow-sm h-100">
         <div class="card-body">
@@ -83,6 +87,19 @@
             Estado de caja, abrir/cerrar y resumen.
           </div>
           <a href="/admin/cash" class="btn btn-sm btn-outline-dark">Abrir Caja</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- ✅ NUEVO: COMPRAS -->
+    <div class="col-12 col-md-6 col-xl-4">
+      <div class="card shadow-sm h-100">
+        <div class="card-body">
+          <div class="fw-bold mb-1">🧾 Compras (Inversión)</div>
+          <div class="text-muted small mb-3">
+            Registra compras, sube stock y actualiza costo promedio.
+          </div>
+          <a href="/admin/purchases/ui" class="btn btn-sm btn-outline-dark">Abrir Compras</a>
         </div>
       </div>
     </div>
@@ -139,7 +156,7 @@
       </div>
     </div>
 
-    <!-- REPORTES (placeholder) -->
+    <!-- REPORTES -->
     <div class="col-12 col-md-6 col-xl-4">
       <div class="card shadow-sm h-100">
         <div class="card-body">
@@ -147,7 +164,7 @@
           <div class="text-muted small mb-3">
             Ventas por día, caja, top productos.
           </div>
-         <a href="/admin/reportes" class="btn btn-outline-primary btn-sm">Abrir Reportes</a>
+          <a href="/admin/reportes" class="btn btn-outline-primary btn-sm">Abrir Reportes</a>
         </div>
       </div>
     </div>

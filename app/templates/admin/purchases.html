@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Compras | Backoffice</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Bootstrap 5 -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    body { background: #f6f7fb; }
+    .navbar-brand { font-weight: 700; }
+    .card { border-radius: 14px; }
+    .btn { border-radius: 10px; }
+    .table thead th { white-space: nowrap; }
+    .muted { color:#6c757d; }
+    .pill { font-size:.85rem; padding:.25rem .6rem; border-radius:999px; }
+    .pill-ok { background:#d1e7dd; color:#0f5132; }
+    .pill-no { background:#f8d7da; color:#842029; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+
+<body>
+
+<!-- Topbar -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid px-3">
+    <a class="navbar-brand" href="/admin/">Backoffice</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-sm btn-outline-light" href="/admin/">Dashboard</a>
+      <a class="btn btn-sm btn-outline-light" href="/pos/ui">Ir al POS</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid mt-4 mb-5 px-3 px-lg-4">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+    <div>
+      <h3 class="fw-bold mb-1">🧾 Compras (Inversión)</h3>
+      <div class="muted">Registra compras, sube stock y actualiza costo promedio (AVCO).</div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary" id="btnNewPurchase">+ Nueva compra</button>
+      <a class="btn btn-outline-secondary" href="/admin/">Volver</a>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card shadow-sm border-0 mb-3">
+    <div class="card-body">
+      <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-4">
+          <label class="form-label">Buscar (proveedor / doc)</label>
+          <input class="form-control" id="q" placeholder="ej: Mayorista / boleta 123">
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label class="form-label">Pagada</label>
+          <select class="form-select" id="paid">
+            <option value="">Todas</option>
+            <option value="1">Sí</option>
+            <option value="0">No</option>
+          </select>
+        </div>
+
+        <div class="col-6 col-md-2">
+          <label class="form-label">Caja #</label>
+          <input class="form-control" id="cash_register_id" placeholder="opcional">
+        </div>
+
+        <div class="col-12 col-md-2">
+          <button class="btn btn-outline-primary w-100" id="btnSearch">Buscar</button>
+        </div>
+
+        <div class="col-12 col-md-2">
+          <button class="btn btn-outline-dark w-100" id="btnRefresh">Refrescar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- List -->
+  <div class="card shadow-sm border-0">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width: 70px;">#</th>
+            <th>Fecha</th>
+            <th>Proveedor</th>
+            <th>Doc</th>
+            <th>Método</th>
+            <th>Pagada</th>
+            <th class="text-end">Total</th>
+            <th style="width: 110px;"></th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr>
+            <td colspan="8" class="text-center muted py-4">Cargando...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Modal Nueva Compra -->
+<div class="modal fade" id="purchaseModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="border-radius: 16px;">
+      <div class="modal-header">
+        <h5 class="modal-title">Nueva compra</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="row g-2 mb-3">
+          <div class="col-12 col-md-4">
+            <label class="form-label">Proveedor</label>
+            <input class="form-control" id="m_supplier" placeholder="ej: Distribuidora X">
+          </div>
+
+          <div class="col-12 col-md-3">
+            <label class="form-label">Doc/Boleta</label>
+            <input class="form-control mono" id="m_invoice" placeholder="123-ABC">
+          </div>
+
+          <div class="col-6 col-md-3">
+            <label class="form-label">Método</label>
+            <select class="form-select" id="m_method">
+              <option value="">-</option>
+              <option value="cash">Efectivo</option>
+              <option value="transfer">Transferencia</option>
+              <option value="credit">Crédito</option>
+            </select>
+          </div>
+
+          <div class="col-6 col-md-2">
+            <label class="form-label">Pagada</label>
+            <select class="form-select" id="m_paid">
+              <option value="1">Sí</option>
+              <option value="0">No</option>
+            </select>
+          </div>
+
+          <div class="col-6 col-md-3">
+            <label class="form-label">Caja # (opcional)</label>
+            <input class="form-control mono" id="m_cr" placeholder="ej: 12">
+          </div>
+
+          <div class="col-12 col-md-9">
+            <label class="form-label">Notas</label>
+            <input class="form-control" id="m_notes" placeholder="ej: compra semanal / oferta">
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div>
+            <h6 class="mb-0">Items</h6>
+            <div class="muted" style="font-size:.9rem;">Agrega productos, cantidad y costo unitario de compra.</div>
+          </div>
+          <button class="btn btn-sm btn-outline-primary" id="btnAddItem">+ Agregar ítem</button>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th style="width:45%">Producto</th>
+                <th style="width:15%">Cant.</th>
+                <th style="width:20%">Costo unit.</th>
+                <th style="width:15%" class="text-end">Subtotal</th>
+                <th style="width:5%"></th>
+              </tr>
+            </thead>
+            <tbody id="m_items"></tbody>
+            <tfoot>
+              <tr>
+                <th colspan="3" class="text-end">Total</th>
+                <th class="text-end" id="m_total">0</th>
+                <th></th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <div class="alert alert-danger d-none" id="m_error"></div>
+        <div class="alert alert-success d-none" id="m_ok"></div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button class="btn btn-primary" id="btnSavePurchase">Guardar compra</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Ver Compra -->
+<div class="modal fade" id="viewModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content" style="border-radius: 16px;">
+      <div class="modal-header">
+        <h5 class="modal-title">Detalle compra</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body" id="viewBody">
+        <div class="text-center muted py-3">Cargando...</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+const $ = (id)=>document.getElementById(id);
+
+let productsCache = [];
+let purchaseModal, viewModal;
+
+function money(n){
+  const x = Number(n || 0);
+  return x.toLocaleString("es-CL", {maximumFractionDigits: 0});
+}
+
+function parseNum(v){
+  const s = String(v || "").replace(",", ".").trim();
+  const n = Number(s);
+  return isNaN(n) ? 0 : n;
+}
+
+async function fetchProducts(){
+  // Usa tu endpoint de admin productos
+  const r = await fetch("/admin/products?active=1");
+  const j = await r.json();
+  productsCache = (j.items || []);
+}
+
+function recalcTotal(){
+  let total = 0;
+  [...$("m_items").querySelectorAll("tr")].forEach(tr=>{
+    const qty = parseNum(tr.querySelector(".qty").value);
+    const cost = parseNum(tr.querySelector(".cost").value);
+    const sub = qty * cost;
+    tr.querySelector(".sub").innerText = money(sub);
+    total += sub;
+  });
+  $("m_total").innerText = money(total);
+  return total;
+}
+
+function itemRow(){
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td>
+      <select class="form-select form-select-sm prod"></select>
+    </td>
+    <td><input class="form-control form-control-sm qty" value="1"></td>
+    <td><input class="form-control form-control-sm cost" value="0"></td>
+    <td class="text-end sub">0</td>
+    <td class="text-end">
+      <button class="btn btn-sm btn-outline-danger del" type="button">✕</button>
+    </td>
+  `;
+
+  const sel = tr.querySelector(".prod");
+  productsCache.forEach(p=>{
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = `${p.name} (${p.unit || "UN"})`;
+    sel.appendChild(opt);
+  });
+
+  tr.querySelector(".qty").addEventListener("input", recalcTotal);
+  tr.querySelector(".cost").addEventListener("input", recalcTotal);
+  tr.querySelector(".del").addEventListener("click", ()=>{
+    tr.remove();
+    recalcTotal();
+  });
+
+  return tr;
+}
+
+function setTableLoading(msg="Cargando..."){
+  $("tbody").innerHTML = `<tr><td colspan="8" class="text-center muted py-4">${msg}</td></tr>`;
+}
+
+async function loadList(){
+  const q = $("q").value.trim();
+  const paid = $("paid").value;
+  const cr = $("cash_register_id").value.trim();
+
+  const params = new URLSearchParams();
+  if(q) params.set("q", q);
+  if(paid) params.set("paid", paid);
+  if(cr) params.set("cash_register_id", cr);
+
+  setTableLoading("Cargando...");
+  const r = await fetch("/admin/purchases?" + params.toString());
+  const j = await r.json();
+
+  const tb = $("tbody");
+  tb.innerHTML = "";
+
+  const items = (j.items || []);
+  if(!items.length){
+    tb.innerHTML = `<tr><td colspan="8" class="text-center muted py-4">Sin resultados</td></tr>`;
+    return;
+  }
+
+  items.forEach(p=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="mono">${p.id}</td>
+      <td>${p.created_at || ""}</td>
+      <td>${p.supplier || "-"}</td>
+      <td class="mono">${p.invoice_ref || "-"}</td>
+      <td>${p.payment_method || "-"}</td>
+      <td>
+        <span class="pill ${p.paid ? 'pill-ok' : 'pill-no'}">${p.paid ? 'Sí' : 'No'}</span>
+      </td>
+      <td class="text-end fw-semibold">${money(p.total_amount)}</td>
+      <td class="text-end">
+        <button class="btn btn-sm btn-outline-primary view" type="button">Ver</button>
+      </td>
+    `;
+    tr.querySelector(".view").addEventListener("click", ()=>openView(p.id));
+    tb.appendChild(tr);
+  });
+}
+
+async function openModal(){
+  $("m_supplier").value = "";
+  $("m_invoice").value = "";
+  $("m_method").value = "";
+  $("m_paid").value = "1";
+  $("m_cr").value = "";
+  $("m_notes").value = "";
+
+  $("m_items").innerHTML = "";
+  $("m_error").classList.add("d-none");
+  $("m_ok").classList.add("d-none");
+
+  $("m_items").appendChild(itemRow());
+  recalcTotal();
+
+  purchaseModal.show();
+}
+
+async function savePurchase(){
+  $("m_error").classList.add("d-none");
+  $("m_ok").classList.add("d-none");
+
+  const items = [...$("m_items").querySelectorAll("tr")].map(tr=>{
+    return {
+      product_id: Number(tr.querySelector(".prod").value),
+      qty: parseNum(tr.querySelector(".qty").value),
+      unit_cost: parseNum(tr.querySelector(".cost").value)
+    };
+  }).filter(x=>x.product_id && x.qty > 0);
+
+  if(!items.length){
+    $("m_error").textContent = "Agrega al menos 1 ítem.";
+    $("m_error").classList.remove("d-none");
+    return;
+  }
+
+  // Validaciones rápidas
+  for(const it of items){
+    if(it.unit_cost < 0){
+      $("m_error").textContent = "Costo unitario inválido.";
+      $("m_error").classList.remove("d-none");
+      return;
+    }
+  }
+
+  const payload = {
+    supplier: $("m_supplier").value.trim(),
+    invoice_ref: $("m_invoice").value.trim(),
+    payment_method: $("m_method").value,
+    paid: $("m_paid").value === "1",
+    cash_register_id: $("m_cr").value.trim() || null,
+    notes: $("m_notes").value.trim(),
+    items
+  };
+
+  const r = await fetch("/admin/purchases", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+
+  const j = await r.json();
+  if(!j.ok){
+    $("m_error").textContent = j.error || "Error al guardar compra.";
+    $("m_error").classList.remove("d-none");
+    return;
+  }
+
+  $("m_ok").textContent = "✅ Compra guardada. Stock actualizado.";
+  $("m_ok").classList.remove("d-none");
+
+  await loadList();
+  // Cierra modal después de un mini delay
+  setTimeout(()=>purchaseModal.hide(), 700);
+}
+
+async function openView(id){
+  $("viewBody").innerHTML = `<div class="text-center muted py-3">Cargando...</div>`;
+  viewModal.show();
+
+  const r = await fetch("/admin/purchases/" + id);
+  const j = await r.json();
+  if(!j.ok){
+    $("viewBody").innerHTML = `<div class="alert alert-danger">No se pudo cargar.</div>`;
+    return;
+  }
+
+  const p = j.purchase;
+  const items = p.items || [];
+
+  let html = `
+    <div class="row g-2 mb-3">
+      <div class="col-12 col-md-3"><div class="muted">Compra #</div><div class="fw-bold mono">${p.id}</div></div>
+      <div class="col-12 col-md-3"><div class="muted">Fecha</div><div class="fw-bold">${p.created_at || "-"}</div></div>
+      <div class="col-12 col-md-3"><div class="muted">Proveedor</div><div class="fw-bold">${p.supplier || "-"}</div></div>
+      <div class="col-12 col-md-3"><div class="muted">Doc</div><div class="fw-bold mono">${p.invoice_ref || "-"}</div></div>
+
+      <div class="col-12 col-md-3"><div class="muted">Método</div><div class="fw-bold">${p.payment_method || "-"}</div></div>
+      <div class="col-12 col-md-3"><div class="muted">Pagada</div><div class="fw-bold">${p.paid ? "Sí" : "No"}</div></div>
+      <div class="col-12 col-md-3"><div class="muted">Caja</div><div class="fw-bold">${p.cash_register_id || "-"}</div></div>
+      <div class="col-12 col-md-3"><div class="muted">Total</div><div class="fw-bold">${money(p.total_amount)}</div></div>
+    </div>
+
+    ${p.notes ? `<div class="mb-3"><div class="muted">Notas</div><div>${p.notes}</div></div>` : ""}
+
+    <div class="table-responsive">
+      <table class="table table-sm align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Producto</th>
+            <th class="text-end">Cant.</th>
+            <th class="text-end">Costo unit.</th>
+            <th class="text-end">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+
+  for(const it of items){
+    html += `
+      <tr>
+        <td>${it.product_name}</td>
+        <td class="text-end">${money(it.qty)}</td>
+        <td class="text-end">${money(it.unit_cost)}</td>
+        <td class="text-end fw-semibold">${money(it.line_total)}</td>
+      </tr>
+    `;
+  }
+
+  html += `
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  $("viewBody").innerHTML = html;
+}
+
+document.addEventListener("DOMContentLoaded", async ()=>{
+  purchaseModal = new bootstrap.Modal(document.getElementById("purchaseModal"));
+  viewModal = new bootstrap.Modal(document.getElementById("viewModal"));
+
+  await fetchProducts();
+  await loadList();
+
+  $("btnSearch").addEventListener("click", loadList);
+  $("btnRefresh").addEventListener("click", loadList);
+
+  $("btnNewPurchase").addEventListener("click", openModal);
+
+  $("btnAddItem").addEventListener("click", ()=>{
+    $("m_items").appendChild(itemRow());
+    recalcTotal();
+  });
+
+  $("btnSavePurchase").addEventListener("click", savePurchase);
+});
+</script>
+
+</body>
+</html>
